@@ -1,0 +1,259 @@
+.notification-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.3);
+  z-index: 999;
+}
+
+.notification-center {
+  position: fixed;
+  top: 60px;
+  right: 20px;
+  width: 420px;
+  max-height: 80vh;
+  background: white;
+  border-radius: 12px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.15);
+  z-index: 1000;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.notification-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 20px;
+  border-bottom: 1px solid #e5e7eb;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+}
+
+.notification-header h3 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.close-btn {
+  background: rgba(255, 255, 255, 0.2);
+  border: none;
+  color: white;
+  font-size: 28px;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+  transition: background 0.2s;
+}
+
+.close-btn:hover {
+  background: rgba(255, 255, 255, 0.3);
+}
+
+.notification-actions {
+  padding: 15px 20px;
+  border-bottom: 1px solid #e5e7eb;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.notification-filters {
+  display: flex;
+  gap: 8px;
+}
+
+.notification-filters button {
+  padding: 6px 12px;
+  border: 1px solid #e5e7eb;
+  background: white;
+  border-radius: 6px;
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.2s;
+  color: #6b7280;
+}
+
+.notification-filters button:hover {
+  border-color: #667eea;
+  color: #667eea;
+}
+
+.notification-filters button.active {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  border-color: transparent;
+}
+
+.mark-all-read-btn {
+  padding: 6px 12px;
+  background: transparent;
+  border: 1px solid #667eea;
+  color: #667eea;
+  border-radius: 6px;
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.mark-all-read-btn:hover {
+  background: #667eea;
+  color: white;
+}
+
+.notification-list {
+  flex: 1;
+  overflow-y: auto;
+  max-height: calc(80vh - 140px);
+}
+
+.notification-loading,
+.notification-empty {
+  padding: 40px 20px;
+  text-align: center;
+  color: #9ca3af;
+}
+
+.notification-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+}
+
+.empty-icon {
+  font-size: 48px;
+  opacity: 0.5;
+}
+
+.notification-empty p {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 500;
+  color: #6b7280;
+}
+
+.notification-empty small {
+  color: #9ca3af;
+}
+
+.notification-item {
+  padding: 16px 20px;
+  border-bottom: 1px solid #f3f4f6;
+  display: flex;
+  gap: 12px;
+  transition: background 0.2s;
+  position: relative;
+}
+
+.notification-item:hover {
+  background: #f9fafb;
+}
+
+.notification-item.unread {
+  background: #eff6ff;
+}
+
+.notification-item.unread::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+}
+
+.notification-icon {
+  font-size: 24px;
+  flex-shrink: 0;
+  width: 40px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #f3f4f6;
+  border-radius: 50%;
+}
+
+.notification-content {
+  flex: 1;
+  min-width: 0;
+}
+
+.notification-title {
+  font-weight: 600;
+  font-size: 14px;
+  color: #1f2937;
+  margin-bottom: 4px;
+}
+
+.notification-message {
+  font-size: 13px;
+  color: #6b7280;
+  line-height: 1.5;
+  margin-bottom: 6px;
+}
+
+.notification-time {
+  font-size: 12px;
+  color: #9ca3af;
+}
+
+.notification-actions-icons {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+}
+
+.mark-read-btn,
+.delete-btn {
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  font-size: 16px;
+  padding: 4px;
+  border-radius: 4px;
+  transition: background 0.2s;
+  opacity: 0.6;
+}
+
+.mark-read-btn:hover {
+  background: #e0e7ff;
+  opacity: 1;
+}
+
+.delete-btn:hover {
+  background: #fee2e2;
+  opacity: 1;
+}
+
+/* Mobile responsiveness */
+@media (max-width: 640px) {
+  .notification-center {
+    right: 10px;
+    left: 10px;
+    width: auto;
+    max-height: 85vh;
+  }
+  
+  .notification-actions {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  
+  .notification-filters {
+    justify-content: space-between;
+  }
+}

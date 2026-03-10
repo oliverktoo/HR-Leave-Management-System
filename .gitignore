@@ -1,0 +1,59 @@
+# Environment variables
+.env
+.env.local
+.env.production
+
+# Dependencies
+node_modules
+**/node_modules
+
+# Build output
+dist
+dist-ssr
+*.local
+frontend/dist
+
+# Editor directories
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# Supabase
+.supabase
+
+# OS
+Thumbs.db
+
+# Local Netlify folder
+.netlify
+
+# Android/Capacitor
+frontend/android/app/build
+frontend/android/.gradle
+frontend/android/build
+frontend/android/local.properties
+frontend/android/.idea
+frontend/android/captures
+
+# iOS/Capacitor
+frontend/ios/App/build
+frontend/ios/Pods
+frontend/ios/.swiftpm
+frontend/ios/App.xcworkspace/xcuserdata
+
+# Backup files
+*.backup
+*.bak
+
+# Temporary files
+*.tmp
+temp/
