@@ -193,6 +193,36 @@ export const Dashboard = () => {
               </div>
             </>
           )}
+          <div className="nav-divider"></div>
+          <div className="nav-item">
+            <button 
+              onClick={() => handleNavigation('/fleet/my-trips')}
+              className="nav-link nav-link-inactive w-full text-left"
+            >
+              <span className="nav-icon">🚗</span>
+              My Trip Requests
+            </button>
+          </div>
+          <div className="nav-item">
+            <button 
+              onClick={() => handleNavigation('/fleet/trip-request/new')}
+              className="nav-link nav-link-inactive w-full text-left"
+            >
+              <span className="nav-icon">➕</span>
+              Request Trip
+            </button>
+          </div>
+          {(profile?.role === 'hod' || profile?.role === 'hr_admin' || profile?.role === 'super_admin') && (
+            <div className="nav-item">
+              <button 
+                onClick={() => handleNavigation('/fleet/trip-approvals')}
+                className="nav-link nav-link-inactive w-full text-left"
+              >
+                <span className="nav-icon">✅</span>
+                Trip Approvals
+              </button>
+            </div>
+          )}
         </nav>
         
         <div className="sidebar-footer">
