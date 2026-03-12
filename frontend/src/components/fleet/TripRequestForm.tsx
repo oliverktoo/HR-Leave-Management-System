@@ -13,3 +13,5 @@ export function TripRequestForm() {
 
   return null;
 }
+
+export default TripRequestForm;
