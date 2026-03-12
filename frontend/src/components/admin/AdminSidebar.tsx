@@ -276,8 +276,16 @@ export const AdminSidebar = ({ isOpen = false, onClose, onNavigate }: AdminSideb
         label: 'Main',
         items: [
           { path: '/dashboard', icon: '📊', label: 'Dashboard' },
-          { path: '/fleet/my-trips', icon: '🚗', label: 'My Trips' },
           { path: '/documents', icon: '📄', label: 'My Documents' },
+        ]
+      },
+      {
+        id: 'trips',
+        icon: '🚗',
+        label: 'Fleet',
+        items: [
+          { path: '/fleet/my-trips', icon: '📋', label: 'My Trip Requests' },
+          { path: '/fleet/trip-request/new', icon: '➕', label: 'Request Trip' },
         ]
       }
     ];
