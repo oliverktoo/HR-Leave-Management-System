@@ -744,7 +744,7 @@ export async function createTripRequest(input: CreateTripRequestInput): Promise<
     })
     .select(`
       *,
-      department:departments!department_id(id, name)
+      department:departments!left(id, name)
     `)
     .single();
 
