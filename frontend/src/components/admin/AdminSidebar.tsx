@@ -2,6 +2,19 @@ import { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../../hooks/useAuth';
 
+interface MenuItem {
+  path: string;
+  icon: string;
+  label: string;
+}
+
+interface MenuGroup {
+  id: string;
+  icon: string;
+  label: string;
+  items: MenuItem[];
+}
+
 interface AdminSidebarProps {
   isOpen?: boolean;
   onClose?: () => void;
@@ -13,8 +26,28 @@ export const AdminSidebar = ({ isOpen = false, onClose, onNavigate }: AdminSideb
   const location = useLocation();
   const { user, profile, signOut } = useAuth();
   const [isCollapsed, setIsCollapsed] = useState(false);
+  const [expandedGroups, setExpandedGroups] = useState<string[]>([]);
 
   const isActive = (path: string) => location.pathname === path;
+  const isGroupActive = (group: MenuGroup) => group.items.some(item => location.pathname.startsWith(item.path));
+
+  const toggleGroup = (groupId: string) => {
+    setExpandedGroups(prev => 
+      prev.includes(groupId) 
+        ? prev.filter(id => id !== groupId)
+        : [...prev, groupId]
+    );
+  };
+
+  // Auto-expand group containing active item
+  useEffect(() => {
+    const menuGroups = getMenuGroups();
+    menuGroups.forEach(group => {
+      if (group.items.some(item => location.pathname.startsWith(item.path))) {
+        setExpandedGroups(prev => prev.includes(group.id) ? prev : [...prev, group.id]);
+      }
+    });
+  }, [location.pathname]);
 
   const handleNavigation = (path: string) => {
     if (onNavigate) {
@@ -46,6 +79,8 @@ export const AdminSidebar = ({ isOpen = false, onClose, onNavigate }: AdminSideb
         return 'HR Administrator';
       case 'hod':
         return 'Head of Department';
+      case 'fleet_manager':
+        return 'Fleet Manager';
       case 'employee':
         return 'Employee';
       default:
@@ -70,54 +105,185 @@ export const AdminSidebar = ({ isOpen = false, onClose, onNavigate }: AdminSideb
     return 'A';
   };
 
-  // Define menu items based on role
-  const getMenuItems = () => {
+  // Define menu groups based on role
+  const getMenuGroups = (): MenuGroup[] => {
     const role = profile?.role;
 
-    // HOD - Limited access to department management only
+    // HOD - Limited access to department management
     if (role === 'hod') {
       return [
-        { path: '/approvals', icon: '✅', label: 'Department Approvals', section: 'main' },
-        { path: '/team-calendar', icon: '📅', label: 'Department Calendar', section: 'main' },
-        { path: '/admin/employee-reports', icon: '👤', label: 'Department Reports', section: 'main' },
-        { path: '/admin/attendance', icon: '🕐', label: 'Department Attendance', section: 'main' },
-        { path: '/documents', icon: '📄', label: 'My Documents', section: 'main' },
-        { path: '/dashboard', icon: '👤', label: 'Employee View', section: 'footer' },
+        {
+          id: 'approvals',
+          icon: '✅',
+          label: 'Approvals',
+          items: [
+            { path: '/approvals', icon: '📋', label: 'Leave Approvals' },
+            { path: '/fleet/trip-approvals', icon: '🚗', label: 'Trip Approvals' },
+          ]
+        },
+        {
+          id: 'department',
+          icon: '👥',
+          label: 'Department',
+          items: [
+            { path: '/team-calendar', icon: '📅', label: 'Team Calendar' },
+            { path: '/admin/employee-reports', icon: '📊', label: 'Reports' },
+            { path: '/admin/attendance', icon: '🕐', label: 'Attendance' },
+          ]
+        },
+        {
+          id: 'personal',
+          icon: '👤',
+          label: 'Personal',
+          items: [
+            { path: '/documents', icon: '📄', label: 'My Documents' },
+            { path: '/fleet/my-trips', icon: '🚗', label: 'My Trips' },
+            { path: '/dashboard', icon: '🏠', label: 'Employee View' },
+          ]
+        }
+      ];
+    }
+
+    // Fleet Manager
+    if (role === 'fleet_manager') {
+      return [
+        {
+          id: 'fleet',
+          icon: '🚗',
+          label: 'Fleet Management',
+          items: [
+            { path: '/fleet/dashboard', icon: '📊', label: 'Dashboard' },
+            { path: '/fleet/vehicles', icon: '🚙', label: 'Vehicles' },
+            { path: '/fleet/drivers', icon: '🪪', label: 'Drivers' },
+            { path: '/fleet/assignments', icon: '📋', label: 'Assignments' },
+            { path: '/fleet/requests', icon: '📝', label: 'All Requests' },
+            { path: '/fleet/fuel', icon: '⛽', label: 'Fuel Records' },
+            { path: '/fleet/maintenance', icon: '🔧', label: 'Maintenance' },
+          ]
+        },
+        {
+          id: 'approvals',
+          icon: '✅',
+          label: 'Approvals',
+          items: [
+            { path: '/approvals', icon: '📋', label: 'Leave Approvals' },
+          ]
+        },
+        {
+          id: 'personal',
+          icon: '👤',
+          label: 'Personal',
+          items: [
+            { path: '/documents', icon: '📄', label: 'My Documents' },
+            { path: '/fleet/my-trips', icon: '🚗', label: 'My Trips' },
+            { path: '/dashboard', icon: '🏠', label: 'Employee View' },
+          ]
+        }
       ];
     }
 
     // HR Admin and Super Admin - Full access
     if (role === 'hr_admin' || role === 'super_admin') {
       return [
-        { path: '/admin/dashboard', icon: '🏠', label: 'Admin Dashboard', section: 'main' },
-        { path: '/admin/users', icon: '👥', label: 'User Management', section: 'main' },
-        { path: '/admin/leave-types', icon: '📋', label: 'Leave Types', section: 'main' },
-        { path: '/admin/leave-balances', icon: '💰', label: 'Leave Balances', section: 'main' },
-        { path: '/admin/reports', icon: '📊', label: 'Reports & Analytics', section: 'main' },
-        { path: '/admin/employee-reports', icon: '👤', label: 'Employee Reports', section: 'main' },
-        { path: '/admin/attendance', icon: '🕐', label: 'Attendance', section: 'main' },
-        { path: '/admin/holidays', icon: '🗓️', label: 'Public Holidays', section: 'main' },
-        { path: '/admin/settings', icon: '⚙️', label: 'Settings', section: 'main' },
-        { path: '/admin/geofence', icon: '📍', label: 'Office Locations', section: 'main' },
-        { path: '/admin/bulk-operations', icon: '📦', label: 'Bulk Operations', section: 'main' },
-        { path: '/admin/documents', icon: '📁', label: 'Employee Documents', section: 'main' },
-        { path: '/approvals', icon: '✅', label: 'Approvals', section: 'main' },
-        { path: '/team-calendar', icon: '📅', label: 'Team Calendar', section: 'main' },
-        { path: '/documents', icon: '📄', label: 'My Documents', section: 'main' },
-        { path: '/dashboard', icon: '👤', label: 'Employee View', section: 'footer' },
+        {
+          id: 'overview',
+          icon: '🏠',
+          label: 'Overview',
+          items: [
+            { path: '/admin/dashboard', icon: '📊', label: 'Admin Dashboard' },
+          ]
+        },
+        {
+          id: 'staff',
+          icon: '👥',
+          label: 'Staff Management',
+          items: [
+            { path: '/admin/users', icon: '👤', label: 'Users' },
+            { path: '/admin/employee-reports', icon: '📊', label: 'Employee Reports' },
+            { path: '/admin/documents', icon: '📁', label: 'Documents' },
+          ]
+        },
+        {
+          id: 'leave',
+          icon: '📋',
+          label: 'Leave Management',
+          items: [
+            { path: '/approvals', icon: '✅', label: 'Approvals' },
+            { path: '/admin/leave-types', icon: '📝', label: 'Leave Types' },
+            { path: '/admin/leave-balances', icon: '💰', label: 'Leave Balances' },
+            { path: '/team-calendar', icon: '📅', label: 'Team Calendar' },
+          ]
+        },
+        {
+          id: 'attendance',
+          icon: '🕐',
+          label: 'Attendance',
+          items: [
+            { path: '/admin/attendance', icon: '📊', label: 'Records' },
+            { path: '/admin/geofence', icon: '📍', label: 'Office Locations' },
+          ]
+        },
+        {
+          id: 'fleet',
+          icon: '🚗',
+          label: 'Fleet Management',
+          items: [
+            { path: '/fleet/dashboard', icon: '📊', label: 'Dashboard' },
+            { path: '/fleet/vehicles', icon: '🚙', label: 'Vehicles' },
+            { path: '/fleet/drivers', icon: '🪪', label: 'Drivers' },
+            { path: '/fleet/assignments', icon: '📋', label: 'Assignments' },
+            { path: '/fleet/requests', icon: '📝', label: 'All Requests' },
+            { path: '/fleet/fuel', icon: '⛽', label: 'Fuel Records' },
+            { path: '/fleet/maintenance', icon: '🔧', label: 'Maintenance' },
+          ]
+        },
+        {
+          id: 'reports',
+          icon: '📊',
+          label: 'Reports & Data',
+          items: [
+            { path: '/admin/reports', icon: '📈', label: 'Analytics' },
+            { path: '/admin/holidays', icon: '🗓️', label: 'Public Holidays' },
+            { path: '/admin/bulk-operations', icon: '📦', label: 'Bulk Operations' },
+          ]
+        },
+        {
+          id: 'settings',
+          icon: '⚙️',
+          label: 'System',
+          items: [
+            { path: '/admin/settings', icon: '🔧', label: 'Settings' },
+          ]
+        },
+        {
+          id: 'personal',
+          icon: '👤',
+          label: 'Personal',
+          items: [
+            { path: '/documents', icon: '📄', label: 'My Documents' },
+            { path: '/fleet/my-trips', icon: '🚗', label: 'My Trips' },
+            { path: '/dashboard', icon: '🏠', label: 'Employee View' },
+          ]
+        }
       ];
     }
 
-    // Default - minimal access
+    // Default - regular employees
     return [
-      { path: '/dashboard', icon: '🏠', label: 'Dashboard', section: 'main' },
-      { path: '/documents', icon: '📄', label: 'My Documents', section: 'main' },
+      {
+        id: 'main',
+        icon: '🏠',
+        label: 'Main',
+        items: [
+          { path: '/dashboard', icon: '📊', label: 'Dashboard' },
+          { path: '/fleet/my-trips', icon: '🚗', label: 'My Trips' },
+          { path: '/documents', icon: '📄', label: 'My Documents' },
+        ]
+      }
     ];
   };
 
-  const menuItems = getMenuItems();
-  const mainMenuItems = menuItems.filter(item => item.section === 'main');
-  const footerMenuItems = menuItems.filter(item => item.section === 'footer');
+  const menuGroups = getMenuGroups();
 
   return (
     <>
@@ -142,32 +308,47 @@ export const AdminSidebar = ({ isOpen = false, onClose, onNavigate }: AdminSideb
       </div>
       
       <nav className="sidebar-nav">
-        {/* Main Menu Items */}
-        {mainMenuItems.map((item) => (
-          <div key={item.path} className="nav-item">
-            <button 
-              onClick={() => handleNavigation(item.path)}
-              className={`nav-link ${isActive(item.path) ? 'nav-link-active' : 'nav-link-inactive'} w-full text-left`}
-            >
-              <span className="nav-icon">{item.icon}</span>
-              {item.label}
-            </button>
-          </div>
-        ))}
-        
-        {/* Divider before footer items */}
-        {footerMenuItems.length > 0 && <div className="nav-divider"></div>}
-        
-        {/* Footer Menu Items */}
-        {footerMenuItems.map((item) => (
-          <div key={item.path} className="nav-item">
-            <button 
-              onClick={() => handleNavigation(item.path)}
-              className="nav-link nav-link-inactive w-full text-left"
-            >
-              <span className="nav-icon">{item.icon}</span>
-              {item.label}
-            </button>
+        {/* Menu Groups */}
+        {menuGroups.map((group) => (
+          <div key={group.id} className="nav-group">
+            {/* Single item groups render directly */}
+            {group.items.length === 1 ? (
+              <button 
+                onClick={() => handleNavigation(group.items[0].path)}
+                className={`nav-link ${isActive(group.items[0].path) ? 'nav-link-active' : 'nav-link-inactive'} w-full text-left`}
+              >
+                <span className="nav-icon">{group.icon}</span>
+                {group.label}
+              </button>
+            ) : (
+              <>
+                {/* Group Header */}
+                <button 
+                  onClick={() => toggleGroup(group.id)}
+                  className={`nav-group-header ${isGroupActive(group) ? 'nav-group-active' : ''}`}
+                >
+                  <span className="nav-icon">{group.icon}</span>
+                  <span className="nav-group-label">{group.label}</span>
+                  <span className={`nav-group-arrow ${expandedGroups.includes(group.id) ? 'expanded' : ''}`}>
+                    ▸
+                  </span>
+                </button>
+                
+                {/* Group Items */}
+                <div className={`nav-group-items ${expandedGroups.includes(group.id) ? 'expanded' : ''}`}>
+                  {group.items.map((item) => (
+                    <button 
+                      key={item.path}
+                      onClick={() => handleNavigation(item.path)}
+                      className={`nav-link nav-subitem ${isActive(item.path) ? 'nav-link-active' : 'nav-link-inactive'} w-full text-left`}
+                    >
+                      <span className="nav-icon">{item.icon}</span>
+                      {item.label}
+                    </button>
+                  ))}
+                </div>
+              </>
+            )}
           </div>
         ))}
       </nav>

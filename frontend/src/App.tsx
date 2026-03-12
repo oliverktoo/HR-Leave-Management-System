@@ -34,6 +34,23 @@ const StaffAttendance = lazy(() => import('./components/attendance/StaffAttendan
 const AdminAttendance = lazy(() => import('./components/attendance/AdminAttendance').then(m => ({ default: m.AdminAttendance })));
 const GeofenceSettings = lazy(() => import('./components/admin/GeofenceSettings').then(m => ({ default: m.GeofenceSettings })));
 
+// Fleet Management Components - Phase 1
+const FleetDashboard = lazy(() => import('./components/fleet/FleetDashboard'));
+const VehicleList = lazy(() => import('./components/fleet/VehicleList'));
+const VehicleForm = lazy(() => import('./components/fleet/VehicleForm'));
+const DriverList = lazy(() => import('./components/fleet/DriverList'));
+const MyTripRequests = lazy(() => import('./components/fleet/MyTripRequests'));
+const TripRequestForm = lazy(() => import('./components/fleet/TripRequestForm'));
+const TripAssignments = lazy(() => import('./components/fleet/TripAssignments'));
+const TripApprovals = lazy(() => import('./components/fleet/TripApprovals'));
+const AllTripRequests = lazy(() => import('./components/fleet/AllTripRequests'));
+
+// Fleet Management Components - Phase 2
+const TripExecution = lazy(() => import('./components/fleet/TripExecution').then(m => ({ default: m.TripExecution })));
+const TripDetails = lazy(() => import('./components/fleet/TripDetails').then(m => ({ default: m.TripDetails })));
+const FuelManagement = lazy(() => import('./components/fleet/FuelManagement').then(m => ({ default: m.FuelManagement })));
+const MaintenanceManagement = lazy(() => import('./components/fleet/MaintenanceManagement').then(m => ({ default: m.MaintenanceManagement })));
+
 function App() {
   return (
     <ErrorBoundary>
@@ -238,6 +255,143 @@ function App() {
             element={
               <ProtectedRoute allowedRoles={['hod', 'hr_admin', 'super_admin']}>
                 <AdminAttendance />
+              </ProtectedRoute>
+            }
+          />
+          
+          {/* Fleet Management Routes */}
+          <Route
+            path="/fleet/dashboard"
+            element={
+              <ProtectedRoute allowedRoles={['fleet_manager', 'hr_admin', 'super_admin']}>
+                <FleetDashboard />
+              </ProtectedRoute>
+            }
+          />
+          
+          <Route
+            path="/fleet/vehicles"
+            element={
+              <ProtectedRoute allowedRoles={['fleet_manager', 'hr_admin', 'super_admin']}>
+                <VehicleList />
+              </ProtectedRoute>
+            }
+          />
+          
+          <Route
+            path="/fleet/vehicles/new"
+            element={
+              <ProtectedRoute allowedRoles={['fleet_manager', 'hr_admin', 'super_admin']}>
+                <VehicleForm />
+              </ProtectedRoute>
+            }
+          />
+          
+          <Route
+            path="/fleet/vehicles/:id/edit"
+            element={
+              <ProtectedRoute allowedRoles={['fleet_manager', 'hr_admin', 'super_admin']}>
+                <VehicleForm />
+              </ProtectedRoute>
+            }
+          />
+          
+          <Route
+            path="/fleet/drivers"
+            element={
+              <ProtectedRoute allowedRoles={['fleet_manager', 'hr_admin', 'super_admin']}>
+                <DriverList />
+              </ProtectedRoute>
+            }
+          />
+          
+          <Route
+            path="/fleet/requests"
+            element={
+              <ProtectedRoute allowedRoles={['fleet_manager', 'hr_admin', 'super_admin']}>
+                <AllTripRequests />
+              </ProtectedRoute>
+            }
+          />
+          
+          <Route
+            path="/fleet/my-trips"
+            element={
+              <ProtectedRoute>
+                <MyTripRequests />
+              </ProtectedRoute>
+            }
+          />
+          
+          <Route
+            path="/fleet/trip-request/new"
+            element={
+              <ProtectedRoute>
+                <TripRequestForm />
+              </ProtectedRoute>
+            }
+          />
+          
+          <Route
+            path="/fleet/assignments"
+            element={
+              <ProtectedRoute allowedRoles={['fleet_manager', 'hr_admin', 'super_admin']}>
+                <TripAssignments />
+              </ProtectedRoute>
+            }
+          />
+          
+          <Route
+            path="/fleet/assignments/:id"
+            element={
+              <ProtectedRoute allowedRoles={['fleet_manager', 'hr_admin', 'super_admin']}>
+                <TripAssignments />
+              </ProtectedRoute>
+            }
+          />
+          
+          <Route
+            path="/fleet/trip-approvals"
+            element={
+              <ProtectedRoute allowedRoles={['hod', 'fleet_manager', 'hr_admin', 'super_admin']}>
+                <TripApprovals />
+              </ProtectedRoute>
+            }
+          />
+          
+          {/* Fleet Management Routes - Phase 2 */}
+          <Route
+            path="/fleet/trip/:id/execute"
+            element={
+              <ProtectedRoute>
+                <TripExecution />
+              </ProtectedRoute>
+            }
+          />
+          
+          <Route
+            path="/fleet/trip/:id/details"
+            element={
+              <ProtectedRoute>
+                <TripDetails />
+              </ProtectedRoute>
+            }
+          />
+          
+          <Route
+            path="/fleet/fuel"
+            element={
+              <ProtectedRoute allowedRoles={['fleet_manager', 'driver', 'hr_admin', 'super_admin']}>
+                <FuelManagement />
+              </ProtectedRoute>
+            }
+          />
+          
+          <Route
+            path="/fleet/maintenance"
+            element={
+              <ProtectedRoute allowedRoles={['fleet_manager', 'hr_admin', 'super_admin']}>
+                <MaintenanceManagement />
               </ProtectedRoute>
             }
           />

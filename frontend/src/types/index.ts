@@ -26,7 +26,7 @@ export interface Database {
 // User & Authentication
 // ============================================================================
 
-export type UserRole = 'employee' | 'hod' | 'hr_admin' | 'super_admin';
+export type UserRole = 'employee' | 'hod' | 'fleet_manager' | 'hr_admin' | 'super_admin';
 
 export interface UserProfile {
   id: string;
