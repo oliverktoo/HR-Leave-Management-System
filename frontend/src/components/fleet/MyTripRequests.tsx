@@ -2,7 +2,7 @@
 // Shows user's trip requests and allows creating new ones
 
 import { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { AdminSidebar } from '../admin/AdminSidebar';
 import { getMyTripRequests, cancelTripRequest } from '../../services/fleetService';
 import { TripRequest, TripRequestStatus } from '../../types/fleet';
@@ -10,11 +10,14 @@ import { TripRequestModal } from './TripRequestModal';
 
 export function MyTripRequests() {
   const navigate = useNavigate();
+  const location = useLocation();
   const [requests, setRequests] = useState<TripRequest[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState<TripRequestStatus | 'all'>('all');
-  const [showModal, setShowModal] = useState(false);
+  const [showModal, setShowModal] = useState(
+    (location.state as { openModal?: boolean } | null)?.openModal === true
+  );
 
   useEffect(() => {
     loadRequests();
