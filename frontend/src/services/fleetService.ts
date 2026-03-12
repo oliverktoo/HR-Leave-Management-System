@@ -733,11 +733,13 @@ export async function createTripRequest(input: CreateTripRequestInput): Promise<
       destination: fullDestination,
       start_datetime,
       end_datetime,
-      passengers,
-      preferred_vehicle_id,
+      passengers: passengers && passengers.length > 0
+        ? passengers.map((name: string) => ({ name }))
+        : null,
+      preferred_vehicle_id: preferred_vehicle_id || null,
       vehicle_requirements: notes || null,
       requester_id: user.id,
-      department_id: profile?.department_id,
+      department_id: profile?.department_id || null,
       passenger_count: input.passenger_count || (input.passengers?.length || 0) + 1,
     })
     .select(`

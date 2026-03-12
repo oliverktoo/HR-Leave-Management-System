@@ -194,7 +194,8 @@ export function TripRequestModal({ isOpen, onClose, onSuccess }: TripRequestModa
       resetForm();
     } catch (err) {
       console.error('Error creating trip request:', err);
-      setError(err instanceof Error ? err.message : 'Failed to create trip request');
+      const errorMessage = (err as any)?.message || (err instanceof Error ? err.message : 'Failed to create trip request');
+      setError(errorMessage);
     } finally {
       setLoading(false);
     }
