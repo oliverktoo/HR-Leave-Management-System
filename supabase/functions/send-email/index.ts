@@ -128,6 +128,34 @@ serve(async (req) => {
           subject: `Leave Request Update — ${from} to ${to}`,
           html: leaveRejectedHtml({ empName: emp.first_name, lt, from, to, days, reviewerName, reason: req_data.hr_comments ?? req_data.hod_comments ?? '' }),
         }
+
+      } else if (type === 'leave_recalled') {
+        if (!emp.email) { console.warn('Employee has no email'); return ok() }
+
+        let recalledByName = 'HR'
+        if (req_data.recalled_by) {
+          const { data: recaller } = await supabase
+            .from('users_profile')
+            .select('first_name, last_name')
+            .eq('id', req_data.recalled_by)
+            .single()
+          if (recaller) recalledByName = `${recaller.first_name} ${recaller.last_name}`
+        }
+
+        const effective = req_data.recall_effective_date
+          ? new Date(req_data.recall_effective_date).toLocaleDateString('en-KE', { day: '2-digit', month: 'short', year: 'numeric' })
+          : from
+
+        emailPayload = {
+          to: emp.email,
+          subject: `↩ Leave Recalled — please report back from ${effective}`,
+          html: leaveRecalledHtml({
+            empName: emp.first_name, lt, from, to, days, effective,
+            daysRestored: req_data.days_restored ?? 0,
+            recalledByName,
+            reason: req_data.recall_reason ?? '',
+          }),
+        }
       }
     }
 
@@ -362,6 +390,26 @@ function leaveRejectedHtml({ empName, lt, from, to, days, reviewerName, reason }
       ${reason ? `<tr><td>Reason</td><td>${reason}</td></tr>` : ''}
     </table>
     <p>Please contact your manager or HR if you have questions.</p>
+    <a href="${APP_URL}/my-leave" class="btn">View My Leave</a>`)
+}
+
+function escapeHtml(s: string) {
+  return s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]!))
+}
+
+function leaveRecalledHtml({ empName, lt, from, to, days, effective, daysRestored, recalledByName, reason }: Record<string,string|number>) {
+  return wrap('#d97706', '↩ Leave Recalled', `
+    <p>Hi ${escapeHtml(String(empName))},</p>
+    <p>Your approved leave has been <strong>recalled</strong>. Please report back to work from <strong>${effective}</strong>.</p>
+    <table>
+      <tr><td>Leave Type</td><td>${escapeHtml(String(lt))}</td></tr>
+      <tr><td>Original Period</td><td>${from} – ${to} (${days} working day(s))</td></tr>
+      <tr><td>Recall Effective</td><td>${effective}</td></tr>
+      <tr><td>Days Restored</td><td>${daysRestored} working day(s) returned to your balance</td></tr>
+      <tr><td>Recalled By</td><td>${escapeHtml(String(recalledByName))}</td></tr>
+      ${reason ? `<tr><td>Reason</td><td>${escapeHtml(String(reason))}</td></tr>` : ''}
+    </table>
+    <p>Please contact HR if you have questions.</p>
     <a href="${APP_URL}/my-leave" class="btn">View My Leave</a>`)
 }
 
