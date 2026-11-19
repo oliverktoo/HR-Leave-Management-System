@@ -64,3 +64,6 @@ temp/
 
 # Local backups
 BU/
+
+# Supabase CLI cache
+supabase/.temp/
