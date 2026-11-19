@@ -48,7 +48,7 @@ BEGIN
   END IF;
   
   -- Generate employee ID
-  employee_id := 'EMP' || LPAD((EXTRACT(EPOCH FROM NOW())::BIGINT % 1000000)::TEXT, 6, '0');
+  employee_id := 'FKF' || LPAD((EXTRACT(EPOCH FROM NOW())::BIGINT % 1000000)::TEXT, 6, '0');
   
   -- Create user in auth.users
   INSERT INTO auth.users (

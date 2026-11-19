@@ -42,7 +42,7 @@ BEGIN
   
   -- Auto-generate employee_id if not provided
   IF NEW.employee_id IS NULL OR NEW.employee_id = '' THEN
-    NEW.employee_id = 'EMP' || TO_CHAR(NEW.created_at, 'YYYYMMDD') || '-' || 
+    NEW.employee_id = 'FKF' || TO_CHAR(NEW.created_at, 'YYYYMMDD') || '-' ||
                      LPAD(EXTRACT(EPOCH FROM NEW.created_at)::INTEGER % 10000, 4, '0');
   END IF;
   
