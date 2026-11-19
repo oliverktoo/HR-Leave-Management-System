@@ -342,6 +342,9 @@ export function computeHousingLevy(
   };
 }
 
+/** Max monthly pension contribution (incl. NSSF) deductible for PAYE — ITA as amended Dec 2024. */
+export const PENSION_DEDUCTION_CAP_MONTHLY = 30_000;
+
 export function computePayrollLine(
   profile: Pick<
     EmployeePayrollProfile,
@@ -384,8 +387,19 @@ export function computePayrollLine(
   // NSSF — computed on cash gross (BIK excluded per NSSF Act)
   const nssf = computeNSSF(grossPay, settings);
 
-  // Taxable income = cash gross + BIK - NSSF employee
-  const taxableIncome = Math.max(0, grossPay + bik - nssf.employee);
+  // SHA/SHIF and Housing Levy (employee shares)
+  const sha = computeSHA(grossPay, settings);
+  const housing = computeHousingLevy(grossPay, settings);
+
+  // Taxable income (Tax Laws (Amendment) Act 2024, effective 27 Dec 2024 — KRA
+  // public notice 2157): SHIF and the Affordable Housing Levy are deducted in
+  // full, and pension contributions (NSSF + registered supplementary pension)
+  // up to KES 30,000/month.
+  const pensionDeduction = Math.min(
+    nssf.employee + (profile.supplementary_pension || 0),
+    PENSION_DEDUCTION_CAP_MONTHLY
+  );
+  const taxableIncome = Math.max(0, grossPay + bik - pensionDeduction - sha - housing.employee);
 
   // PAYE (before reliefs)
   const { payeBeforeRelief, paye: payeAfterPersonalRelief } = computePAYE(
@@ -397,12 +411,6 @@ export function computePayrollLine(
   // Insurance relief = 15% of qualifying medical premium, capped KES 5,000/month
   const insuranceRelief = Math.min(Math.round((profile.medical_premium || 0) * 0.15), 5000);
   const paye = Math.max(0, payeAfterPersonalRelief - insuranceRelief);
-
-  // SHA/SHIF
-  const sha = computeSHA(grossPay, settings);
-
-  // Housing Levy
-  const housing = computeHousingLevy(grossPay, settings);
 
   // Statutory deductions total
   const statutoryTotal = nssf.employee + sha + housing.employee + paye;
@@ -623,6 +631,9 @@ export async function computeAndSaveRun(runId: string): Promise<{
   ]);
 
   if (empResult.error) throw empResult.error;
+  // Without these, a recompute would silently wipe overtime/bonuses already entered
+  if (existingLinesResult.error) throw existingLinesResult.error;
+  if (absenceResult.error) throw absenceResult.error;
 
   const workingDaysInMonth: number = (wdResult.data as number) || 22;
 
