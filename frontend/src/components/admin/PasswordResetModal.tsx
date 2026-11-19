@@ -9,7 +9,7 @@ interface PasswordResetModalProps {
   onSuccess: () => void;
 }
 
-export const PasswordResetModal = ({ userId, userEmail, userName, onClose, onSuccess }: PasswordResetModalProps) => {
+export const PasswordResetModal = ({ userId: _userId, userEmail, userName, onClose, onSuccess }: PasswordResetModalProps) => {
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [loading, setLoading] = useState(false);

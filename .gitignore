@@ -57,3 +57,10 @@ frontend/ios/App.xcworkspace/xcuserdata
 # Temporary files
 *.tmp
 temp/
+
+# Local tool/editor settings
+.github/.claude/
+*.code-workspace
+
+# Local backups
+BU/

@@ -1,7 +1,7 @@
 // Trip Execution Component
 // Interface for drivers to start and end trips
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { AdminSidebar } from '../admin/AdminSidebar';
 import {
@@ -12,6 +12,7 @@ import {
   endTrip,
   getTripLogs,
 } from '../../services/fleetPhase2Service';
+import { startGpsTracking, syncOfflineGpsQueue } from '../../services/gpsService';
 import { TripRequest } from '../../types/fleet';
 import { TripLog } from '../../types/fleetPhase2';
 import { useAuth } from '../../hooks/useAuth';
@@ -20,13 +21,14 @@ export function TripExecution() {
   const navigate = useNavigate();
   const { id } = useParams<{ id: string }>();
   const { profile } = useAuth();
-  
+
   const [trip, setTrip] = useState<TripRequest | null>(null);
   const [tripLogs, setTripLogs] = useState<TripLog[]>([]);
   const [loading, setLoading] = useState(true);
   const [processing, setProcessing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const gpsStopFnRef = useRef<(() => void) | null>(null);
   
   // Start trip form
   const [startOdometer, setStartOdometer] = useState<string>('');
@@ -82,10 +84,14 @@ export function TripExecution() {
         start_odometer: parseFloat(startOdometer),
       });
 
+      // Start GPS tracking (30-second intervals)
+      gpsStopFnRef.current = startGpsTracking(trip.id, 30000);
+      await syncOfflineGpsQueue();
+
       setSuccess('Trip started successfully!');
       setShowStartForm(false);
       await loadTripData(trip.id);
-      
+
       setTimeout(() => setSuccess(null), 3000);
     } catch (err: any) {
       console.error('Error starting trip:', err);
@@ -117,10 +123,17 @@ export function TripExecution() {
         trip_feedback: tripFeedback || undefined,
       });
 
+      // Stop GPS tracking and sync any queued points
+      if (gpsStopFnRef.current) {
+        gpsStopFnRef.current();
+        gpsStopFnRef.current = null;
+      }
+      await syncOfflineGpsQueue();
+
       setSuccess('Trip completed successfully!');
       setShowEndForm(false);
       await loadTripData(trip.id);
-      
+
       setTimeout(() => {
         setSuccess(null);
         navigate('/fleet/my-trips');
@@ -237,11 +250,11 @@ export function TripExecution() {
               </div>
               <div className="detail-item">
                 <strong>Planned Departure:</strong>
-                <span>{new Date(trip.start_datetime).toLocaleString()}</span>
+                <span>{new Date(trip.start_datetime).toLocaleString('en-GB', { timeZone: 'Africa/Nairobi', day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}</span>
               </div>
               <div className="detail-item">
                 <strong>Planned Return:</strong>
-                <span>{new Date(trip.end_datetime).toLocaleString()}</span>
+                <span>{new Date(trip.end_datetime).toLocaleString('en-GB', { timeZone: 'Africa/Nairobi', day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}</span>
               </div>
               <div className="detail-item">
                 <strong>Passengers:</strong>
@@ -316,7 +329,7 @@ export function TripExecution() {
                   <span className="stat-label">Started At</span>
                   <span className="stat-value">
                     {trip.actual_start_datetime 
-                      ? new Date(trip.actual_start_datetime).toLocaleString()
+                      ? new Date(trip.actual_start_datetime).toLocaleString('en-GB', { timeZone: 'Africa/Nairobi', day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })
                       : 'N/A'}
                   </span>
                 </div>
@@ -485,7 +498,7 @@ export function TripExecution() {
                       <div className="log-header">
                         <span className="log-type">{formatLogType(log.log_type)}</span>
                         <span className="log-time">
-                          {new Date(log.log_datetime).toLocaleString()}
+                          {new Date(log.log_datetime).toLocaleString('en-GB', { timeZone: 'Africa/Nairobi', day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
                         </span>
                       </div>
                       <p className="log-description">{log.description}</p>

@@ -26,7 +26,7 @@ export interface Database {
 // User & Authentication
 // ============================================================================
 
-export type UserRole = 'employee' | 'hod' | 'fleet_manager' | 'hr_admin' | 'super_admin';
+export type UserRole = 'employee' | 'driver' | 'hod' | 'fleet_manager' | 'hr_admin' | 'super_admin' | 'finance' | 'ceo' | 'auditor';
 
 export interface UserProfile {
   id: string;
@@ -36,9 +36,12 @@ export interface UserProfile {
   employee_id: string;
   department_id: string;
   role: UserRole;
+  secondary_role?: UserRole | null;
   phone?: string;
   is_active: boolean;
   must_change_password?: boolean;
+  license_expiry_date?: string;
+  push_token?: string;
   created_at: string;
   updated_at: string;
   department?: Department;
@@ -111,7 +114,7 @@ export interface LeaveBalance {
 // Leave Requests
 // ============================================================================
 
-export type LeaveRequestStatus = 'pending' | 'hod_approved' | 'approved' | 'rejected' | 'cancelled';
+export type LeaveRequestStatus = 'pending' | 'hod_approved' | 'approved' | 'rejected' | 'cancelled' | 'recalled';
 
 export interface LeaveRequest {
   id: string;
@@ -134,7 +137,14 @@ export interface LeaveRequest {
   hr_approved_by?: string;
   hr_approved_at?: string;
   hr_comments?: string;
+  // Recall fields
+  recalled_by?: string;
+  recalled_at?: string;
+  recall_reason?: string;
+  recall_effective_date?: string;
+  days_restored?: number;
   document_url?: string;
+  cover_person?: string;
   created_at: string;
   updated_at: string;
   // Joined data
@@ -153,6 +163,7 @@ export interface LeaveRequestFormData {
   total_days: number;
   reason: string;
   document_url?: string;
+  cover_person: string;
 }
 
 export interface LeaveRequestFilters {
@@ -197,7 +208,22 @@ export interface PublicHoliday {
 // Notifications
 // ============================================================================
 
-export type NotificationType = 'leave_request' | 'leave_approved' | 'leave_rejected' | 'leave_cancelled' | 'system';
+export type NotificationType =
+  | 'leave_request'
+  | 'leave_approved'
+  | 'leave_rejected'
+  | 'leave_cancelled'
+  | 'approval'
+  | 'rejection'
+  | 'trip_approved'
+  | 'trip_assigned'
+  | 'trip_rejected'
+  | 'trip_completed'
+  | 'fleet'
+  | 'attendance'
+  | 'document'
+  | 'payroll'
+  | 'system';
 
 export interface Notification {
   id: string;
@@ -206,7 +232,8 @@ export interface Notification {
   title: string;
   message: string;
   is_read: boolean;
-  related_leave_request_id?: string;
+  related_id?: string;
+  related_type?: 'leave_request' | 'trip_request' | 'document' | 'attendance' | 'payroll';
   created_at: string;
 }
 
@@ -377,8 +404,11 @@ export interface DocumentType {
   name: string;
   display_name: string;
   description?: string;
+  category: string;
+  sort_order: number;
   is_required: boolean;
   requires_expiry: boolean;
+  show_to_staff: boolean;
   allowed_mime_types: string[];
   max_file_size: number;
   is_active: boolean;

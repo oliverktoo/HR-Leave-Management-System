@@ -2,9 +2,9 @@
 // Shows all vehicles with filtering and management options
 
 import { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
 import { AdminSidebar } from '../admin/AdminSidebar';
-import { getVehicles, deleteVehicle, createVehicle, updateVehicle, getVehicleById } from '../../services/fleetService';
+import NotificationBell from '../notifications/NotificationBell';
+import { getVehicles, deleteVehicle, createVehicle, updateVehicle } from '../../services/fleetService';
 import { FleetVehicle, VehicleStatus, VehicleFuelType, VehicleFilters, CreateVehicleInput } from '../../types/fleet';
 import { useAuth } from '../../hooks/useAuth';
 import { supabase } from '../../lib/supabaseClient';
@@ -15,7 +15,6 @@ interface Department {
 }
 
 export function VehicleList() {
-  const navigate = useNavigate();
   const { profile } = useAuth();
   const [vehicles, setVehicles] = useState<FleetVehicle[]>([]);
   const [departments, setDepartments] = useState<Department[]>([]);
@@ -194,119 +193,123 @@ export function VehicleList() {
   return (
     <div className="admin-layout">
       <AdminSidebar />
-      <main className="admin-main">
-        <div className="admin-container">
-          <header className="page-header">
-            <div className="header-content">
-              <h1>🚙 Vehicles</h1>
-              <p className="header-subtitle">Manage fleet vehicles</p>
-            </div>
-            {canManage && (
-              <button 
-                className="btn btn-primary"
-                onClick={() => handleOpenModal()}
-              >
-                + Add Vehicle
-              </button>
-            )}
-          </header>
-
-          {error && !showModal && (
-            <div className="alert alert-error mb-4">
-              <span>{error}</span>
-              <button onClick={() => setError(null)}>×</button>
-            </div>
+      <div className="admin-main">
+        <div className="page-header">
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1.5rem' }}>
+            <h1 className="page-title">🚙 Vehicles</h1>
+            <NotificationBell />
+          </div>
+          <div className="header-content">
+            <p className="page-subtitle">Manage fleet vehicles</p>
+          </div>
+          {canManage && (
+            <button 
+              className="btn btn-primary"
+              onClick={() => handleOpenModal()}
+            >
+              + Add Vehicle
+            </button>
           )}
+        </div>
 
-          {/* Filters */}
-          <div className="admin-card mb-4">
-            <div className="card-header">
+        {error && !showModal && (
+          <div className="alert alert-error mb-4">
+            <span>{error}</span>
+            <button onClick={() => setError(null)}>×</button>
+          </div>
+        )}
+
+        {/* Filters */}
+        <div className="card mb-4">
+          <div className="card-header">
+            <button 
+              className="btn btn-link"
+              onClick={() => setShowFilters(!showFilters)}
+            >
+              🔍 {showFilters ? 'Hide Filters' : 'Show Filters'}
+            </button>
+            {Object.keys(filters).length > 0 && (
               <button 
-                className="btn btn-link"
-                onClick={() => setShowFilters(!showFilters)}
+                className="btn btn-sm btn-secondary"
+                onClick={clearFilters}
               >
-                🔍 {showFilters ? 'Hide Filters' : 'Show Filters'}
+                Clear Filters
               </button>
-              {Object.keys(filters).length > 0 && (
-                <button 
-                  className="btn btn-sm btn-secondary"
-                  onClick={clearFilters}
-                >
-                  Clear Filters
-                </button>
-              )}
-            </div>
-            
-            {showFilters && (
-              <div className="card-body">
-                <div className="filter-grid">
-                  <div className="form-group">
-                    <label>Search</label>
-                    <input
-                      type="text"
-                      className="form-control"
-                      placeholder="Plate, make, or model..."
-                      value={filters.search || ''}
-                      onChange={(e) => setFilters({ ...filters, search: e.target.value })}
-                    />
-                  </div>
-                  
-                  <div className="form-group">
-                    <label>Status</label>
-                    <select
-                      className="form-control"
-                      value={filters.status || ''}
-                      onChange={(e) => setFilters({ 
-                        ...filters, 
-                        status: e.target.value as VehicleStatus || undefined 
-                      })}
-                    >
-                      <option value="">All Statuses</option>
-                      <option value="available">Available</option>
-                      <option value="in_use">In Use</option>
-                      <option value="maintenance">Maintenance</option>
-                      <option value="retired">Retired</option>
-                    </select>
-                  </div>
-                  
-                  <div className="form-group">
-                    <label>Fuel Type</label>
-                    <select
-                      className="form-control"
-                      value={filters.fuel_type || ''}
-                      onChange={(e) => setFilters({ 
-                        ...filters, 
-                        fuel_type: e.target.value as VehicleFuelType || undefined 
-                      })}
-                    >
-                      <option value="">All Fuel Types</option>
-                      <option value="petrol">Petrol</option>
-                      <option value="diesel">Diesel</option>
-                      <option value="electric">Electric</option>
-                      <option value="hybrid">Hybrid</option>
-                    </select>
-                  </div>
-                  
-                  <div className="form-group">
-                    <label>Department</label>
-                    <select
-                      className="form-control"
-                      value={filters.department_id || ''}
-                      onChange={(e) => setFilters({ 
-                        ...filters, 
-                        department_id: e.target.value || undefined 
-                      })}
-                    >
-                      <option value="">All Departments</option>
-                      {departments.map((dept) => (
-                        <option key={dept.id} value={dept.id}>{dept.name}</option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
-              </div>
             )}
           </div>
+          
+          {showFilters && (
+            <div className="card-body">
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <div className="form-group">
+                  <label className="form-label">Search</label>
+                  <input
+                    type="text"
+                    className="form-input"
+                    placeholder="Plate, make, or model..."
+                    value={filters.search || ''}
+                    onChange={(e) => setFilters({ ...filters, search: e.target.value })}
+                  />
+                </div>
+                
+                <div className="form-group">
+                  <label className="form-label">Status</label>
+                  <select
+                    className="form-select"
+                    value={filters.status || ''}
+                    onChange={(e) => setFilters({ 
+                      ...filters, 
+                      status: e.target.value as VehicleStatus || undefined 
+                    })}
+                  >
+                    <option value="">All Statuses</option>
+                    <option value="available">Available</option>
+                    <option value="in_use">In Use</option>
+                    <option value="maintenance">Maintenance</option>
+                    <option value="retired">Retired</option>
+                  </select>
+                </div>
+                
+                <div className="form-group">
+                  <label className="form-label">Fuel Type</label>
+                  <select
+                    className="form-select"
+                    value={filters.fuel_type || ''}
+                    onChange={(e) => setFilters({ 
+                      ...filters, 
+                      fuel_type: e.target.value as VehicleFuelType || undefined 
+                    })}
+                  >
+                    <option value="">All Fuel Types</option>
+                    <option value="petrol">Petrol</option>
+                    <option value="diesel">Diesel</option>
+                    <option value="electric">Electric</option>
+                    <option value="hybrid">Hybrid</option>
+                  </select>
+                </div>
+                
+                <div className="form-group">
+                  <label className="form-label">Department</label>
+                  <select
+                    className="form-select"
+                    value={filters.department_id || ''}
+                    onChange={(e) => setFilters({ 
+                      ...filters, 
+                      department_id: e.target.value || undefined 
+                    })}
+                  >
+                    <option value="">All Departments</option>
+                    {departments.map((dept) => (
+                      <option key={dept.id} value={dept.id}>
+                        {dept.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
 
           {/* Vehicle List */}
           {loading ? (
@@ -333,309 +336,305 @@ export function VehicleList() {
               )}
             </div>
           ) : (
-            <div className="vehicle-grid">
-              {vehicles.map((vehicle) => (
-                <div 
-                  key={vehicle.id} 
-                  className="vehicle-card"
-                >
-                  <div className="vehicle-header">
-                    <span className="vehicle-plate">{vehicle.plate_number}</span>
-                    {getStatusBadge(vehicle.status)}
-                  </div>
-                  
-                  <div className="vehicle-body">
-                    <h3 className="vehicle-name">
-                      {vehicle.make} {vehicle.model}
-                    </h3>
-                    {vehicle.year && (
-                      <p className="vehicle-year">{vehicle.year}</p>
-                    )}
-                    
-                    <div className="vehicle-specs">
-                      <span title="Fuel Type">
-                        {getFuelTypeIcon(vehicle.fuel_type)} {vehicle.fuel_type}
-                      </span>
-                      <span title="Seating Capacity">
-                        👥 {vehicle.seating_capacity} seats
-                      </span>
-                    </div>
-                    
-                    {vehicle.current_odometer && (
-                      <p className="vehicle-odometer">
-                        🛣️ {vehicle.current_odometer.toLocaleString()} km
-                      </p>
-                    )}
-                    
-                    {vehicle.assigned_department && (
-                      <p className="vehicle-department">
-                        🏢 {(vehicle.assigned_department as any).name}
-                      </p>
-                    )}
-                  </div>
-                  
-                  <div className="vehicle-footer">
-                    {vehicle.insurance_expiry && (
-                      <span 
-                        className={`expiry-badge ${
-                          new Date(vehicle.insurance_expiry) <= new Date() 
-                            ? 'expired' 
-                            : new Date(vehicle.insurance_expiry) <= new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)
-                            ? 'expiring-soon'
-                            : ''
-                        }`}
-                        title="Insurance Expiry"
-                      >
-                        📋 {new Date(vehicle.insurance_expiry).toLocaleDateString()}
-                      </span>
-                    )}
-                    
-                    {canManage && (
-                      <div className="vehicle-actions">
-                        <button 
-                          className="btn btn-sm btn-secondary"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleOpenModal(vehicle);
-                          }}
-                        >
-                          ✏️ Edit
-                        </button>
-                        {vehicle.status !== 'retired' && (
-                          <button 
-                            className="btn btn-sm btn-danger"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleDelete(vehicle.id, vehicle.plate_number);
-                            }}
-                          >
-                            🗑️
-                          </button>
-                        )}
-                      </div>
-                    )}
-                  </div>
+            <div className="card">
+              <div className="card-body">
+                <div className="table-responsive">
+                  <table className="table">
+                    <thead>
+                      <tr>
+                        <th>Vehicle</th>
+                        <th>Status</th>
+                        <th>Fuel Type</th>
+                        <th>Odometer</th>
+                        <th>Insurance</th>
+                        <th>Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {vehicles.map((vehicle) => (
+                        <tr key={vehicle.id}>
+                          <td>
+                            <div>
+                              <div className="font-semibold text-gray-900">{vehicle.plate_number}</div>
+                              <div className="text-sm text-gray-600">{vehicle.make} {vehicle.model}</div>
+                              {vehicle.year && (
+                                <div className="text-xs text-gray-500">{vehicle.year}</div>
+                              )}
+                            </div>
+                          </td>
+                          <td>
+                            {getStatusBadge(vehicle.status)}
+                          </td>
+                          <td>
+                            <div className="flex items-center gap-2">
+                              <span>{getFuelTypeIcon(vehicle.fuel_type)}</span>
+                              <span className="capitalize">{vehicle.fuel_type}</span>
+                            </div>
+                          </td>
+                          <td>
+                            {vehicle.current_odometer ? `${vehicle.current_odometer.toLocaleString()} km` : 'N/A'}
+                          </td>
+                          <td>
+                            {vehicle.insurance_expiry ? (
+                              <span className={`text-sm ${
+                                new Date(vehicle.insurance_expiry) <= new Date() 
+                                  ? 'text-red-600' 
+                                  : new Date(vehicle.insurance_expiry) <= new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)
+                                  ? 'text-yellow-600'
+                                  : 'text-green-600'
+                              }`}>
+                                {new Date(vehicle.insurance_expiry).toLocaleDateString('en-GB', { timeZone: 'Africa/Nairobi', day: '2-digit', month: 'short', year: 'numeric' })}
+                              </span>
+                            ) : 'N/A'}
+                          </td>
+                          <td>
+                            {canManage && (
+                              <div className="flex gap-2">
+                                <button 
+                                  className="btn btn-sm btn-secondary"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleOpenModal(vehicle);
+                                  }}
+                                >
+                                  Edit
+                                </button>
+                                {vehicle.status !== 'retired' && (
+                                  <button 
+                                    className="btn btn-sm btn-danger"
+                                    onClick={(_e) => handleDelete(vehicle.id, vehicle.plate_number)}
+                                  >
+                                    Retire
+                                  </button>
+                                )}
+                              </div>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
                 </div>
-              ))}
+              </div>
             </div>
           )}
 
           {/* Results Summary */}
           {vehicles.length > 0 && (
-            <div className="results-summary mt-4">
+            <div className="mt-4 text-sm text-gray-600">
               Showing {vehicles.length} vehicle{vehicles.length !== 1 ? 's' : ''}
             </div>
           )}
         </div>
 
-        {/* Add/Edit Vehicle Modal */}
-        {showModal && (
-          <div className="modal-overlay">
-            <div className="modal modal-lg">
-              <div className="modal-header">
-                <h3>{editingVehicle ? '✏️ Edit Vehicle' : '🚙 Add New Vehicle'}</h3>
-                <button className="modal-close" onClick={handleCloseModal}>×</button>
-              </div>
-              <form onSubmit={handleSubmit}>
-                <div className="modal-body">
-                  {error && (
-                    <div className="alert alert-error mb-3">
-                      <span>{error}</span>
-                    </div>
-                  )}
+      {/* Add/Edit Vehicle Modal */}
+      {showModal && (
+        <div className="modal-overlay">
+          <div className="modal modal-lg">
+            <div className="modal-header">
+              <h3>{editingVehicle ? 'Edit Vehicle' : 'Add New Vehicle'}</h3>
+              <button className="modal-close" onClick={handleCloseModal}>×</button>
+            </div>
+            <form onSubmit={handleSubmit}>
+              <div className="modal-body">
+                {error && (
+                  <div className="alert alert-error mb-3">
+                    <span>{error}</span>
+                  </div>
+                )}
 
-                  <div className="form-grid-2">
-                    <div className="form-group">
-                      <label className="required">Plate Number</label>
-                      <input
-                        type="text"
-                        className="form-control"
-                        value={formData.plate_number}
-                        onChange={(e) => setFormData({...formData, plate_number: e.target.value.toUpperCase()})}
-                        placeholder="e.g., KBZ 123A"
-                        required
-                      />
-                    </div>
+                <div className="form-grid-2">
+                  <div className="form-group">
+                    <label className="form-label">Plate Number *</label>
+                    <input
+                      type="text"
+                      className="form-input"
+                      value={formData.plate_number}
+                      onChange={(e) => setFormData({...formData, plate_number: e.target.value.toUpperCase()})}
+                      placeholder="e.g., KBZ 123A"
+                      required
+                    />
+                  </div>
 
-                    <div className="form-group">
-                      <label>Status</label>
-                      <select
-                        className="form-control"
-                        value={status}
-                        onChange={(e) => setStatus(e.target.value as VehicleStatus)}
-                      >
-                        <option value="available">Available</option>
-                        <option value="in_use">In Use</option>
-                        <option value="maintenance">Maintenance</option>
-                        <option value="retired">Retired</option>
-                      </select>
-                    </div>
+                  <div className="form-group">
+                    <label className="form-label">Status</label>
+                    <select
+                      className="form-select"
+                      value={status}
+                      onChange={(e) => setStatus(e.target.value as VehicleStatus)}
+                    >
+                      <option value="available">Available</option>
+                      <option value="in_use">In Use</option>
+                      <option value="maintenance">Maintenance</option>
+                      <option value="retired">Retired</option>
+                    </select>
+                  </div>
 
-                    <div className="form-group">
-                      <label className="required">Make</label>
-                      <input
-                        type="text"
-                        className="form-control"
-                        value={formData.make}
-                        onChange={(e) => setFormData({...formData, make: e.target.value})}
-                        placeholder="e.g., Toyota"
-                        required
-                      />
-                    </div>
+                  <div className="form-group">
+                    <label className="form-label">Make *</label>
+                    <input
+                      type="text"
+                      className="form-input"
+                      value={formData.make}
+                      onChange={(e) => setFormData({...formData, make: e.target.value})}
+                      placeholder="e.g., Toyota"
+                      required
+                    />
+                  </div>
 
-                    <div className="form-group">
-                      <label className="required">Model</label>
-                      <input
-                        type="text"
-                        className="form-control"
-                        value={formData.model}
-                        onChange={(e) => setFormData({...formData, model: e.target.value})}
-                        placeholder="e.g., Hiace"
-                        required
-                      />
-                    </div>
+                  <div className="form-group">
+                    <label className="form-label">Model *</label>
+                    <input
+                      type="text"
+                      className="form-input"
+                      value={formData.model}
+                      onChange={(e) => setFormData({...formData, model: e.target.value})}
+                      placeholder="e.g., Hiace"
+                      required
+                    />
+                  </div>
 
-                    <div className="form-group">
-                      <label>Year</label>
-                      <input
-                        type="number"
-                        className="form-control"
-                        value={formData.year || ''}
-                        onChange={(e) => setFormData({...formData, year: parseInt(e.target.value) || undefined})}
-                        min="1990"
-                        max={new Date().getFullYear() + 1}
-                      />
-                    </div>
+                  <div className="form-group">
+                    <label className="form-label">Year</label>
+                    <input
+                      type="number"
+                      className="form-input"
+                      value={formData.year || ''}
+                      onChange={(e) => setFormData({...formData, year: parseInt(e.target.value) || undefined})}
+                      placeholder="e.g., 2020"
+                      min="1900"
+                      max={new Date().getFullYear() + 1}
+                    />
+                  </div>
 
-                    <div className="form-group">
-                      <label>Color</label>
-                      <input
-                        type="text"
-                        className="form-control"
-                        value={formData.color || ''}
-                        onChange={(e) => setFormData({...formData, color: e.target.value})}
-                        placeholder="e.g., White"
-                      />
-                    </div>
+                  <div className="form-group">
+                    <label className="form-label">Color</label>
+                    <input
+                      type="text"
+                      className="form-input"
+                      value={formData.color || ''}
+                      onChange={(e) => setFormData({...formData, color: e.target.value})}
+                      placeholder="e.g., White"
+                    />
+                  </div>
 
-                    <div className="form-group">
-                      <label>Fuel Type</label>
-                      <select
-                        className="form-control"
-                        value={formData.fuel_type}
-                        onChange={(e) => setFormData({...formData, fuel_type: e.target.value as VehicleFuelType})}
-                      >
-                        <option value="petrol">Petrol</option>
-                        <option value="diesel">Diesel</option>
-                        <option value="electric">Electric</option>
-                        <option value="hybrid">Hybrid</option>
-                      </select>
-                    </div>
+                  <div className="form-group">
+                    <label className="form-label">Fuel Type</label>
+                    <select
+                      className="form-select"
+                      value={formData.fuel_type}
+                      onChange={(e) => setFormData({...formData, fuel_type: e.target.value as VehicleFuelType})}
+                    >
+                      <option value="petrol">Petrol</option>
+                      <option value="diesel">Diesel</option>
+                      <option value="electric">Electric</option>
+                      <option value="hybrid">Hybrid</option>
+                    </select>
+                  </div>
 
-                    <div className="form-group">
-                      <label>Seating Capacity</label>
-                      <input
-                        type="number"
-                        className="form-control"
-                        value={formData.seating_capacity}
-                        onChange={(e) => setFormData({...formData, seating_capacity: parseInt(e.target.value) || 5})}
-                        min="1"
-                        max="50"
-                      />
-                    </div>
+                  <div className="form-group">
+                    <label className="form-label">Seating Capacity</label>
+                    <input
+                      type="number"
+                      className="form-input"
+                      value={formData.seating_capacity}
+                      onChange={(e) => setFormData({...formData, seating_capacity: parseInt(e.target.value) || 5})}
+                      min="1"
+                      max="50"
+                    />
+                  </div>
 
-                    <div className="form-group">
-                      <label>Current Odometer (km)</label>
-                      <input
-                        type="number"
-                        className="form-control"
-                        value={formData.current_odometer || ''}
-                        onChange={(e) => setFormData({...formData, current_odometer: parseInt(e.target.value) || 0})}
-                        min="0"
-                      />
-                    </div>
+                  <div className="form-group">
+                    <label className="form-label">Current Odometer (km)</label>
+                    <input
+                      type="number"
+                      className="form-input"
+                      value={formData.current_odometer || ''}
+                      onChange={(e) => setFormData({...formData, current_odometer: parseInt(e.target.value) || 0})}
+                      min="0"
+                    />
+                  </div>
 
-                    <div className="form-group">
-                      <label>Assigned Department</label>
-                      <select
-                        className="form-control"
-                        value={formData.assigned_department_id || ''}
-                        onChange={(e) => setFormData({...formData, assigned_department_id: e.target.value || undefined})}
-                      >
-                        <option value="">-- No Department --</option>
-                        {departments.map(dept => (
-                          <option key={dept.id} value={dept.id}>
-                            {dept.name}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
+                  <div className="form-group">
+                    <label className="form-label">Assigned Department</label>
+                    <select
+                      className="form-select"
+                      value={formData.assigned_department_id || ''}
+                      onChange={(e) => setFormData({...formData, assigned_department_id: e.target.value || undefined})}
+                    >
+                      <option value="">-- No Department --</option>
+                      {departments.map(dept => (
+                        <option key={dept.id} value={dept.id}>
+                          {dept.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
 
-                    <div className="form-group">
-                      <label>Insurance Expiry</label>
-                      <input
-                        type="date"
-                        className="form-control"
-                        value={formData.insurance_expiry || ''}
-                        onChange={(e) => setFormData({...formData, insurance_expiry: e.target.value || undefined})}
-                      />
-                    </div>
+                  <div className="form-group">
+                    <label className="form-label">Insurance Expiry</label>
+                    <input
+                      type="date"
+                      className="form-input"
+                      value={formData.insurance_expiry || ''}
+                      onChange={(e) => setFormData({...formData, insurance_expiry: e.target.value || undefined})}
+                    />
+                  </div>
 
-                    <div className="form-group">
-                      <label>Next Service Date</label>
-                      <input
-                        type="date"
-                        className="form-control"
-                        value={formData.next_service_date || ''}
-                        onChange={(e) => setFormData({...formData, next_service_date: e.target.value || undefined})}
-                      />
-                    </div>
+                  <div className="form-group">
+                    <label className="form-label">Next Service Date</label>
+                    <input
+                      type="date"
+                      className="form-input"
+                      value={formData.next_service_date || ''}
+                      onChange={(e) => setFormData({...formData, next_service_date: e.target.value || undefined})}
+                    />
+                  </div>
 
-                    <div className="form-group">
-                      <label>Next Service Odometer (km)</label>
-                      <input
-                        type="number"
-                        className="form-control"
-                        value={formData.next_service_odometer || ''}
-                        onChange={(e) => setFormData({...formData, next_service_odometer: parseInt(e.target.value) || undefined})}
-                        min="0"
-                      />
-                    </div>
+                  <div className="form-group">
+                    <label className="form-label">Next Service Odometer (km)</label>
+                    <input
+                      type="number"
+                      className="form-input"
+                      value={formData.next_service_odometer || ''}
+                      onChange={(e) => setFormData({...formData, next_service_odometer: parseInt(e.target.value) || undefined})}
+                      min="0"
+                    />
+                  </div>
 
-                    <div className="form-group full-width">
-                      <label>Notes</label>
-                      <textarea
-                        className="form-control"
-                        rows={3}
-                        value={formData.notes || ''}
-                        onChange={(e) => setFormData({...formData, notes: e.target.value})}
-                        placeholder="Additional notes about this vehicle..."
-                      />
-                    </div>
+                  <div className="form-group full-width">
+                    <label className="form-label">Notes</label>
+                    <textarea
+                      className="form-input"
+                      rows={3}
+                      value={formData.notes || ''}
+                      onChange={(e) => setFormData({...formData, notes: e.target.value})}
+                      placeholder="Additional notes about this vehicle..."
+                    />
                   </div>
                 </div>
-                <div className="modal-footer">
-                  <button 
-                    type="button" 
-                    className="btn btn-secondary"
-                    onClick={handleCloseModal}
-                    disabled={saving}
-                  >
-                    Cancel
-                  </button>
-                  <button 
-                    type="submit" 
-                    className="btn btn-primary"
-                    disabled={saving}
-                  >
-                    {saving ? 'Saving...' : editingVehicle ? 'Update Vehicle' : 'Add Vehicle'}
-                  </button>
-                </div>
-              </form>
-            </div>
+              </div>
+              <div className="modal-footer">
+                <button 
+                  type="button" 
+                  className="btn btn-secondary"
+                  onClick={handleCloseModal}
+                  disabled={saving}
+                >
+                  Cancel
+                </button>
+                <button 
+                  type="submit" 
+                  className="btn btn-primary"
+                  disabled={saving}
+                >
+                  {saving ? 'Saving...' : editingVehicle ? 'Update Vehicle' : 'Add Vehicle'}
+                </button>
+              </div>
+            </form>
           </div>
-        )}
-      </main>
+        </div>
+      )}
     </div>
   );
 }

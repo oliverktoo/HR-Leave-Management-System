@@ -16,6 +16,7 @@ interface FormData {
   startDate: string;
   endDate: string;
   reason: string;
+  coverPerson: string;
   document: File | null;
 }
 
@@ -36,6 +37,7 @@ export const LeaveRequestForm = () => {
     startDate: '',
     endDate: '',
     reason: '',
+    coverPerson: '',
     document: null,
   });
 
@@ -199,6 +201,12 @@ export const LeaveRequestForm = () => {
       return;
     }
     
+    // Validate cover person
+    if (!formData.coverPerson.trim()) {
+      setError('Please specify who will cover your duties during your absence');
+      return;
+    }
+
     // Validate reason
     if (!formData.reason.trim()) {
       setError('Please provide a reason for your leave');
@@ -244,6 +252,7 @@ export const LeaveRequestForm = () => {
         end_date: formData.endDate,
         total_days: calculatedDays,
         reason: formData.reason.trim(),
+        cover_person: formData.coverPerson.trim(),
         document_url: documentUrl || undefined,
         status: 'pending' as const
       };
@@ -562,7 +571,7 @@ export const LeaveRequestForm = () => {
                     className="form-input enhanced-input"
                     value={formData.startDate}
                     onChange={(e) => handleInputChange('startDate', e.target.value)}
-                    min={new Date().toISOString().split('T')[0]}
+                    min={new Date().toLocaleDateString('en-CA', { timeZone: 'Africa/Nairobi' })}
                   />
                 </div>
 
@@ -576,7 +585,7 @@ export const LeaveRequestForm = () => {
                     className="form-input enhanced-input"
                     value={formData.endDate}
                     onChange={(e) => handleInputChange('endDate', e.target.value)}
-                    min={formData.startDate || new Date().toISOString().split('T')[0]}
+                    min={formData.startDate || new Date().toLocaleDateString('en-CA', { timeZone: 'Africa/Nairobi' })}
                   />
                 </div>
               </div>
@@ -607,6 +616,25 @@ export const LeaveRequestForm = () => {
                   Step 3: Add Details
                 </h3>
                 <p className="step-subtitle">Provide reason and review your request</p>
+              </div>
+
+              <div className="form-group enhanced-form-group">
+                <label className="form-label">
+                  <span className="label-icon">👤</span>
+                  Who Will Cover Your Duties? *
+                </label>
+                <input
+                  type="text"
+                  className="form-input enhanced-input"
+                  value={formData.coverPerson}
+                  onChange={(e) => handleInputChange('coverPerson', e.target.value)}
+                  placeholder="Full name of the colleague covering your duties"
+                />
+                {!formData.coverPerson.trim() && (
+                  <p className="text-xs text-orange-600 mt-1">
+                    Required — specify who will handle your responsibilities during your absence
+                  </p>
+                )}
               </div>
 
               <div className="form-group enhanced-form-group">
@@ -706,6 +734,10 @@ export const LeaveRequestForm = () => {
                     <span className="summary-label">Duration:</span>
                     <span className="summary-value">{calculatedDays} days</span>
                   </div>
+                  <div className="summary-item">
+                    <span className="summary-label">Cover Person:</span>
+                    <span className="summary-value">{formData.coverPerson || '—'}</span>
+                  </div>
                 </div>
               </div>
             </div>
@@ -741,10 +773,11 @@ export const LeaveRequestForm = () => {
                 <button 
                   onClick={handleSubmit}
                   className="btn btn-success nav-btn submit-btn"
-                  disabled={loading || !user?.id || !formData.reason.trim() || formData.reason.length < 10}
-                  title={!user?.id ? 'User session not available' : 
-                         !formData.reason.trim() ? 'Please enter a reason' : 
-                         formData.reason.length < 10 ? 'Reason must be at least 10 characters' : 
+                  disabled={loading || !user?.id || !formData.coverPerson.trim() || !formData.reason.trim() || formData.reason.length < 10}
+                  title={!user?.id ? 'User session not available' :
+                         !formData.coverPerson.trim() ? 'Please specify who will cover your duties' :
+                         !formData.reason.trim() ? 'Please enter a reason' :
+                         formData.reason.length < 10 ? 'Reason must be at least 10 characters' :
                          'Submit your leave request'}
                 >
                   {loading ? (

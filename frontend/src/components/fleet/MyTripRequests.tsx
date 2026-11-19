@@ -26,11 +26,12 @@ export function MyTripRequests() {
   const loadRequests = async () => {
     try {
       setLoading(true);
+      setError(null);
       const data = await getMyTripRequests();
       setRequests(data);
-    } catch (err) {
+    } catch (err: any) {
       console.error('Error loading trip requests:', err);
-      setError('Failed to load trip requests');
+      setError(err?.message || 'Failed to load trip requests');
     } finally {
       setLoading(false);
     }
@@ -48,6 +49,15 @@ export function MyTripRequests() {
       console.error('Error cancelling request:', err);
       setError('Failed to cancel request');
     }
+  };
+
+  const parseRoute = (destination: string) => {
+    const fromMatch = destination.match(/From:\s*(.+?)\s*\|/i);
+    const toMatch = destination.match(/To:\s*(.+)$/i);
+    if (fromMatch && toMatch) {
+      return { from: fromMatch[1].trim(), to: toMatch[1].trim() };
+    }
+    return { from: null, to: destination };
   };
 
   const getStatusBadge = (status: TripRequestStatus) => {
@@ -163,37 +173,52 @@ export function MyTripRequests() {
                   </div>
                   
                   <div className="request-body">
-                    <div className="request-route">
-                      <div className="route-point">
-                        <span className="point-icon">🎯</span>
-                        <span className="point-label">Route</span>
-                        <span className="point-value">{request.destination}</span>
+                    {/* Route display */}
+                    {(() => {
+                      const route = parseRoute(request.destination);
+                      return (
+                        <div className="request-route-row">
+                          {route.from && (
+                            <>
+                              <div className="route-stop">
+                                <span className="route-dot origin"></span>
+                                <div className="route-stop-info">
+                                  <span className="route-stop-label">From</span>
+                                  <span className="route-stop-value">{route.from}</span>
+                                </div>
+                              </div>
+                              <span className="route-arrow-icon">→</span>
+                            </>
+                          )}
+                          <div className="route-stop">
+                            <span className="route-dot destination"></span>
+                            <div className="route-stop-info">
+                              <span className="route-stop-label">To</span>
+                              <span className="route-stop-value">{route.to}</span>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })()}
+                    
+                    <div className="request-meta">
+                      <div className="meta-item">
+                        <span className="meta-icon">📅</span>
+                        <span>{new Date(request.start_datetime).toLocaleDateString('en-KE', { day: 'numeric', month: 'short', year: 'numeric' })}</span>
+                      </div>
+                      <div className="meta-item">
+                        <span className="meta-icon">⏰</span>
+                        <span>{new Date(request.start_datetime).toLocaleTimeString('en-GB', { timeZone: 'Africa/Nairobi', hour: '2-digit', minute: '2-digit' })} – {new Date(request.end_datetime).toLocaleTimeString('en-GB', { timeZone: 'Africa/Nairobi', hour: '2-digit', minute: '2-digit' })}</span>
+                      </div>
+                      <div className="meta-item">
+                        <span className="meta-icon">👥</span>
+                        <span>{request.passenger_count} passenger{request.passenger_count !== 1 ? 's' : ''}</span>
                       </div>
                     </div>
                     
-                    <div className="request-details">
-                      <div className="detail-item">
-                        <span className="detail-icon">📅</span>
-                        <span className="detail-label">Date</span>
-                        <span className="detail-value">
-                          {new Date(request.start_datetime).toLocaleDateString()}
-                        </span>
-                      </div>
-                      <div className="detail-item">
-                        <span className="detail-icon">⏰</span>
-                        <span className="detail-label">Time</span>
-                        <span className="detail-value">
-                          {new Date(request.start_datetime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                        </span>
-                      </div>
-                      <div className="detail-item">
-                        <span className="detail-icon">👥</span>
-                        <span className="detail-label">Passengers</span>
-                        <span className="detail-value">{request.passenger_count}</span>
-                      </div>
-                    </div>
-                    
-                    <p className="request-purpose">{request.purpose}</p>
+                    {request.purpose && (
+                      <p className="request-purpose">📋 {request.purpose}</p>
+                    )}
                     
                     {/* Assignment Info */}
                     {request.status === 'assigned' && request.assigned_vehicle && (
@@ -201,7 +226,7 @@ export function MyTripRequests() {
                         <div className="assignment-item">
                           <span className="assignment-icon">🚗</span>
                           <span>
-                            {(request.assigned_vehicle as any).plate_number} - 
+                            {(request.assigned_vehicle as any).plate_number} — 
                             {(request.assigned_vehicle as any).make} {(request.assigned_vehicle as any).model}
                           </span>
                         </div>
@@ -224,20 +249,20 @@ export function MyTripRequests() {
                   
                   <div className="request-footer">
                     <span className="request-date">
-                      Submitted: {new Date(request.created_at).toLocaleDateString()}
+                      Submitted {new Date(request.created_at).toLocaleDateString('en-KE', { day: 'numeric', month: 'short', year: 'numeric' })}
                     </span>
                     <div className="request-actions">
                       {canCancel(request.status) && (
                         <button 
-                          className="btn btn-sm btn-danger"
+                          className="btn btn-sm btn-outline-danger"
                           onClick={() => handleCancel(request.id, request.request_number)}
                         >
                           Cancel
                         </button>
                       )}
                       <button 
-                        className="btn btn-sm btn-secondary"
-                        onClick={() => navigate(`/fleet/trip-request/${request.id}`)}
+                        className="btn btn-sm btn-primary"
+                        onClick={() => navigate(`/fleet/trip/${request.id}/details`)}
                       >
                         View Details
                       </button>

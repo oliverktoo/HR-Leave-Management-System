@@ -3,6 +3,7 @@
 
 import { useState, useEffect } from 'react';
 import { AdminSidebar } from '../admin/AdminSidebar';
+import NotificationBell from '../notifications/NotificationBell';
 import { getDrivers, createDriverProfile, updateDriverProfile } from '../../services/fleetService';
 import { DriverProfile } from '../../types/fleet';
 import { supabase } from '../../lib/supabaseClient';
@@ -186,17 +187,19 @@ export function DriverList() {
   return (
     <div className="admin-layout">
       <AdminSidebar />
-      <main className="admin-main">
-        <div className="admin-container">
-          <header className="page-header">
-            <div className="header-content">
-              <h1>🪪 Driver Management</h1>
-              <p className="header-subtitle">Manage registered drivers and their licenses</p>
-            </div>
-            <button className="btn btn-primary" onClick={() => handleOpenModal()}>
-              + Add Driver
-            </button>
-          </header>
+      <div className="admin-main">
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1.5rem' }}>
+          <h1 className="page-title">🪪 Driver Management</h1>
+          <NotificationBell />
+        </div>
+        <div className="page-header">
+          <div className="header-content">
+            <p className="page-subtitle">Manage registered drivers and their licenses</p>
+          </div>
+          <button className="btn btn-primary" onClick={() => handleOpenModal()}>
+            + Add Driver
+          </button>
+        </div>
 
           {error && (
             <div className="alert alert-error mb-4">
@@ -275,7 +278,7 @@ export function DriverList() {
                     <div className="detail-row">
                       <span className="detail-label">Expiry</span>
                       <span className={`detail-value ${isLicenseExpired(driver.license_expiry) ? 'text-danger' : isLicenseExpiringSoon(driver.license_expiry) ? 'text-warning' : ''}`}>
-                        {new Date(driver.license_expiry).toLocaleDateString()}
+                        {new Date(driver.license_expiry).toLocaleDateString('en-GB', { timeZone: 'Africa/Nairobi', day: '2-digit', month: 'short', year: 'numeric' })}
                         {isLicenseExpired(driver.license_expiry) && ' ⚠️ Expired'}
                         {!isLicenseExpired(driver.license_expiry) && isLicenseExpiringSoon(driver.license_expiry) && ' ⚠️ Expiring Soon'}
                       </span>
@@ -310,7 +313,6 @@ export function DriverList() {
               ))}
             </div>
           )}
-        </div>
 
         {/* Add/Edit Driver Modal */}
         {showModal && (
@@ -331,9 +333,9 @@ export function DriverList() {
                   <div className="form-grid-2">
                     {!editingDriver && (
                       <div className="form-group full-width">
-                        <label className="required">Select Employee</label>
+                        <label className="form-label required">Select Employee</label>
                         <select
-                          className="form-control"
+                          className="form-select"
                           value={formData.user_id}
                           onChange={(e) => setFormData({...formData, user_id: e.target.value})}
                           required
@@ -349,10 +351,10 @@ export function DriverList() {
                     )}
 
                     <div className="form-group">
-                      <label className="required">License Number</label>
+                      <label className="form-label required">License Number</label>
                       <input
                         type="text"
-                        className="form-control"
+                        className="form-input"
                         value={formData.license_number}
                         onChange={(e) => setFormData({...formData, license_number: e.target.value})}
                         placeholder="e.g., DL123456"
@@ -361,9 +363,9 @@ export function DriverList() {
                     </div>
 
                     <div className="form-group">
-                      <label>License Class</label>
+                      <label className="form-label">License Class</label>
                       <select
-                        className="form-control"
+                        className="form-select"
                         value={formData.license_class}
                         onChange={(e) => setFormData({...formData, license_class: e.target.value})}
                       >
@@ -377,10 +379,10 @@ export function DriverList() {
                     </div>
 
                     <div className="form-group">
-                      <label className="required">License Expiry</label>
+                      <label className="form-label required">License Expiry</label>
                       <input
                         type="date"
-                        className="form-control"
+                        className="form-input"
                         value={formData.license_expiry}
                         onChange={(e) => setFormData({...formData, license_expiry: e.target.value})}
                         required
@@ -388,10 +390,10 @@ export function DriverList() {
                     </div>
 
                     <div className="form-group">
-                      <label>Emergency Contact Name</label>
+                      <label className="form-label">Emergency Contact Name</label>
                       <input
                         type="text"
-                        className="form-control"
+                        className="form-input"
                         value={formData.emergency_contact_name}
                         onChange={(e) => setFormData({...formData, emergency_contact_name: e.target.value})}
                         placeholder="Contact person name"
@@ -399,10 +401,10 @@ export function DriverList() {
                     </div>
 
                     <div className="form-group">
-                      <label>Emergency Contact Phone</label>
+                      <label className="form-label">Emergency Contact Phone</label>
                       <input
                         type="tel"
-                        className="form-control"
+                        className="form-input"
                         value={formData.emergency_contact_phone}
                         onChange={(e) => setFormData({...formData, emergency_contact_phone: e.target.value})}
                         placeholder="+254..."
@@ -411,9 +413,9 @@ export function DriverList() {
 
                     {editingDriver && (
                       <div className="form-group">
-                        <label>Status</label>
+                        <label className="form-label">Status</label>
                         <select
-                          className="form-control"
+                          className="form-select"
                           value={formData.is_active ? 'active' : 'inactive'}
                           onChange={(e) => setFormData({...formData, is_active: e.target.value === 'active'})}
                         >
@@ -424,9 +426,9 @@ export function DriverList() {
                     )}
 
                     <div className="form-group full-width">
-                      <label>Notes</label>
+                      <label className="form-label">Notes</label>
                       <textarea
-                        className="form-control"
+                        className="form-input"
                         value={formData.notes}
                         onChange={(e) => setFormData({...formData, notes: e.target.value})}
                         rows={3}
@@ -447,7 +449,7 @@ export function DriverList() {
             </div>
           </div>
         )}
-      </main>
+      </div>
     </div>
   );
 }

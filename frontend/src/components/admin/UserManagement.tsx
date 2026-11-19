@@ -12,7 +12,8 @@ interface UserProfile {
   first_name: string;
   last_name: string;
   phone?: string | null;
-  role: 'employee' | 'hod' | 'hr_admin';
+  role: 'employee' | 'hod' | 'hr_admin' | 'super_admin' | 'finance' | 'ceo' | 'fleet_manager' | 'driver' | 'auditor';
+  secondary_role?: AppRole | null;
   is_active: boolean;
   created_at: string;
   updated_at?: string;
@@ -21,13 +22,16 @@ interface UserProfile {
   full_name?: string; // Computed field for display
 }
 
+type AppRole = 'employee' | 'hod' | 'hr_admin' | 'super_admin' | 'finance' | 'ceo' | 'fleet_manager' | 'driver' | 'auditor';
+
 interface NewUserFormData {
   email: string;
   first_name: string;
   last_name: string;
   phone: string;
   department_id: string;
-  role: 'employee' | 'hod' | 'hr_admin';
+  role: AppRole;
+  secondary_role: AppRole | '';
   is_active: boolean;
 }
 
@@ -42,13 +46,15 @@ const UserManagement = () => {
   const [showAddModal, setShowAddModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
   const [selectedUser, setSelectedUser] = useState<UserProfile | null>(null);
+  const [editEmail, setEditEmail] = useState('');
+  const [showEmailConfirm, setShowEmailConfirm] = useState(false);
   const [showPasswordModal, setShowPasswordModal] = useState(false);
   const [showPasswordResetModal, setShowPasswordResetModal] = useState(false);
   const [userForPasswordReset, setUserForPasswordReset] = useState<UserProfile | null>(null);
   const [generatedCredentials, setGeneratedCredentials] = useState({ email: '', password: '', fullName: '' });
   const [copySuccess, setCopySuccess] = useState(false);
   const [activeDropdown, setActiveDropdown] = useState<string | null>(null);
-  const [dropdownPosition, setDropdownPosition] = useState<{ top: number; left: number } | null>(null);
+  const [_dropdownPosition, setDropdownPosition] = useState<{ top: number; left: number } | null>(null);
   
   const [newUser, setNewUser] = useState<NewUserFormData>({
     email: '',
@@ -57,6 +63,7 @@ const UserManagement = () => {
     phone: '',
     department_id: '',
     role: 'employee',
+    secondary_role: '',
     is_active: true
   });
 
@@ -79,6 +86,7 @@ const UserManagement = () => {
             last_name,
             phone,
             role,
+            secondary_role,
             is_active,
             created_at,
             updated_at,
@@ -174,12 +182,20 @@ const UserManagement = () => {
       });
 
       if (error) throw error;
-      
+
       if (data && !data.success) {
         throw new Error(data.error || 'Failed to create user');
       }
 
       const userId = data.user_id;
+
+      // Save secondary_role if provided
+      if (newUser.secondary_role) {
+        await supabase
+          .from('users_profile')
+          .update({ secondary_role: newUser.secondary_role })
+          .eq('id', userId);
+      }
 
       // Initialize leave balances for the new user
       const currentYear = new Date().getFullYear();
@@ -227,6 +243,7 @@ const UserManagement = () => {
         phone: '',
         department_id: '',
         role: 'employee',
+        secondary_role: '',
         is_active: true
       });
       
@@ -258,18 +275,37 @@ const UserManagement = () => {
     e.preventDefault();
     if (!selectedUser) return;
 
+    const emailChanged = editEmail.trim().toLowerCase() !== selectedUser.email.toLowerCase();
+
+    // If email changed, require the confirmation checkbox before submitting
+    if (emailChanged && !showEmailConfirm) {
+      setShowEmailConfirm(true);
+      return;
+    }
+
     try {
       setLoading(true);
-      
+
+      // Change the auth email first (RPC handles auth.users + profile sync)
+      if (emailChanged) {
+        const { error: rpcError } = await supabase.rpc('admin_update_user_email', {
+          p_user_id:   selectedUser.id,
+          p_new_email: editEmail.trim().toLowerCase(),
+        });
+        if (rpcError) throw rpcError;
+      }
+
+      // Update everything else in users_profile
       const { error } = await supabase
         .from('users_profile')
         .update({
-          first_name: selectedUser.first_name,
-          last_name: selectedUser.last_name,
-          phone: selectedUser.phone,
-          department_id: selectedUser.department_id,
-          role: selectedUser.role,
-          is_active: selectedUser.is_active
+          first_name:     selectedUser.first_name,
+          last_name:      selectedUser.last_name,
+          phone:          selectedUser.phone,
+          department_id:  selectedUser.department_id,
+          role:           selectedUser.role,
+          secondary_role: selectedUser.secondary_role || null,
+          is_active:      selectedUser.is_active,
         })
         .eq('id', selectedUser.id);
 
@@ -277,9 +313,12 @@ const UserManagement = () => {
 
       setShowEditModal(false);
       setSelectedUser(null);
+      setShowEmailConfirm(false);
       loadData();
-      alert('User updated successfully!');
-      
+      alert(emailChanged
+        ? 'User updated. Email changed — the staff member must use the new address to log in.'
+        : 'User updated successfully!');
+
     } catch (error) {
       console.error('Error updating user:', error);
       alert('Error updating user: ' + (error as Error).message);
@@ -351,18 +390,30 @@ const UserManagement = () => {
 
   const getRoleBadgeClass = (role: string): string => {
     const classes: Record<string, string> = {
-      employee: 'role-badge role-employee',
-      hod: 'role-badge role-hod',
-      hr_admin: 'role-badge role-admin'
+      employee:      'role-badge role-employee',
+      hod:           'role-badge role-hod',
+      hr_admin:      'role-badge role-admin',
+      super_admin:   'role-badge role-admin',
+      finance:       'role-badge role-hod',
+      ceo:           'role-badge role-admin',
+      auditor:       'role-badge role-hod',
+      fleet_manager: 'role-badge role-hod',
+      driver:        'role-badge role-employee',
     };
     return classes[role] || 'role-badge role-employee';
   };
 
   const getRoleDisplayName = (role: string): string => {
     const names: Record<string, string> = {
-      employee: 'Employee',
-      hod: 'HOD',
-      hr_admin: 'HR Admin'
+      employee:      'Employee',
+      hod:           'Head of Department',
+      hr_admin:      'HR Admin',
+      super_admin:   'Super Admin',
+      finance:       'Finance Officer',
+      ceo:           'CEO',
+      auditor:       'Auditor',
+      fleet_manager: 'Fleet Manager',
+      driver:        'Driver',
     };
     return names[role] || 'Employee';
   };
@@ -456,8 +507,14 @@ const UserManagement = () => {
               >
                 <option value="all">All Roles</option>
                 <option value="employee">Employee</option>
-                <option value="hod">HOD</option>
+                <option value="hod">Head of Department</option>
                 <option value="hr_admin">HR Admin</option>
+                <option value="super_admin">Super Admin</option>
+                <option value="finance">Finance Officer</option>
+                <option value="ceo">CEO</option>
+                <option value="auditor">Auditor</option>
+                <option value="fleet_manager">Fleet Manager</option>
+                <option value="driver">Driver</option>
               </select>
             </div>
           </div>
@@ -517,7 +574,7 @@ const UserManagement = () => {
                           {u.is_active ? 'Active' : 'Inactive'}
                         </span>
                       </td>
-                      <td>{new Date(u.created_at).toLocaleDateString()}</td>
+                      <td>{new Date(u.created_at).toLocaleDateString('en-GB', { timeZone: 'Africa/Nairobi', day: '2-digit', month: 'short', year: 'numeric' })}</td>
                       <td style={{ position: 'relative', overflow: 'visible' }}>
                         <div className="action-dropdown" style={{ position: 'relative', display: 'inline-block' }}>
                           <button 
@@ -583,8 +640,21 @@ const UserManagement = () => {
                                 </div>
 
                                 <button
+                                  onClick={() => { navigate(`/admin/employees/${u.id}`); setActiveDropdown(null); }}
+                                  className="dropdown-item"
+                                  style={{ width: '100%', padding: '0.875rem 1rem', border: 'none', background: 'transparent', textAlign: 'left', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.75rem', fontSize: '1rem', color: '#374151', borderRadius: '6px', transition: 'background 0.2s' }}
+                                  onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#ede9fe'}
+                                  onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
+                                >
+                                  <span style={{ fontSize: '1.25rem' }}>👤</span>
+                                  <div><div style={{ fontWeight: 600 }}>View Full Profile</div><div style={{ fontSize: '0.8rem', color: '#6b7280' }}>All records in one view</div></div>
+                                </button>
+
+                                <button
                                   onClick={() => {
                                     setSelectedUser(u);
+                                    setEditEmail(u.email);
+                                    setShowEmailConfirm(false);
                                     setShowEditModal(true);
                                     setActiveDropdown(null);
                                   }}
@@ -808,15 +878,53 @@ const UserManagement = () => {
                   <select
                     className="form-select"
                     value={newUser.role}
-                    onChange={(e) => setNewUser({...newUser, role: e.target.value as 'employee' | 'hod' | 'hr_admin'})}
+                    onChange={(e) => setNewUser({...newUser, role: e.target.value as AppRole})}
                     required
                   >
                     <option value="employee">Employee</option>
-                    <option value="hod">HOD</option>
+                    <option value="hod">Head of Department (HOD)</option>
                     <option value="hr_admin">HR Admin</option>
+                    <option value="super_admin">Super Admin</option>
+                    <option value="finance">Finance Officer</option>
+                    <option value="ceo">CEO</option>
+                    <option value="auditor">Auditor</option>
+                    <option value="fleet_manager">Fleet Manager</option>
+                    <option value="driver">Driver</option>
                   </select>
+                  <small className="form-help" style={{ marginTop: 4, display: 'block' }}>
+                    {newUser.role === 'employee'      && 'Standard staff — leave, attendance, documents, trip requests, payslips.'}
+                    {newUser.role === 'hod'           && 'Approves leave & trip requests for their department. Can manage OOO assignments.'}
+                    {newUser.role === 'hr_admin'      && 'Full HR access — users, payroll, attendance, OOO, fleet oversight.'}
+                    {newUser.role === 'super_admin'   && 'All permissions including system settings. Use sparingly.'}
+                    {newUser.role === 'finance'       && 'Reviews and approves payroll runs at the Finance stage. Views KRA exports and analytics.'}
+                    {newUser.role === 'ceo'           && 'Final payroll approver. Views analytics and HR/fleet reports.'}
+                    {newUser.role === 'fleet_manager' && 'Manages vehicles, drivers, trips, fuel, maintenance, and compliance.'}
+                    {newUser.role === 'driver'        && 'Views assigned trips, logs fuel, submits inspections, and records mileage.'}
+                  </small>
                 </div>
-                
+
+                <div className="form-group">
+                  <label className="form-label">Secondary Role <span style={{ color: '#94a3b8', fontWeight: 400 }}>(optional)</span></label>
+                  <select
+                    className="form-select"
+                    value={newUser.secondary_role}
+                    onChange={(e) => setNewUser({...newUser, secondary_role: e.target.value as AppRole | ''})}
+                  >
+                    <option value="">None</option>
+                    <option value="employee">Employee</option>
+                    <option value="hod">Head of Department (HOD)</option>
+                    <option value="hr_admin">HR Admin</option>
+                    <option value="finance">Finance Officer</option>
+                    <option value="ceo">CEO</option>
+                    <option value="auditor">Auditor</option>
+                    <option value="fleet_manager">Fleet Manager</option>
+                    <option value="driver">Driver</option>
+                  </select>
+                  <small className="form-help" style={{ marginTop: 4, display: 'block' }}>
+                    Grants additional menu access. E.g. a Finance Officer who is also HOD Finance.
+                  </small>
+                </div>
+
                 <div className="form-group checkbox-group">
                   <label className="checkbox-label">
                     <input
@@ -828,9 +936,9 @@ const UserManagement = () => {
                   </label>
                 </div>
               </div>
-              
+
               <div className="modal-footer">
-                <button 
+                <button
                   type="button"
                   onClick={() => setShowAddModal(false)}
                   className="btn btn-secondary"
@@ -860,6 +968,7 @@ const UserManagement = () => {
                 onClick={() => {
                   setShowEditModal(false);
                   setSelectedUser(null);
+                  setShowEmailConfirm(false);
                 }}
                 className="modal-close"
               >
@@ -894,14 +1003,59 @@ const UserManagement = () => {
                 </div>
                 
                 <div className="form-group">
-                  <label className="form-label">Email (Read Only)</label>
+                  <label className="form-label">Email / Login Address</label>
                   <input
                     type="email"
                     className="form-input"
-                    value={selectedUser.email}
-                    disabled
+                    value={editEmail}
+                    onChange={(e) => {
+                      setEditEmail(e.target.value);
+                      setShowEmailConfirm(false);
+                    }}
+                    required
+                    placeholder="staff@fkf.co.ke"
                   />
+                  {editEmail.trim().toLowerCase() !== selectedUser.email.toLowerCase() && (
+                    <small style={{ color: '#f59e0b', marginTop: 4, display: 'block' }}>
+                      ⚠️ Changing email will update the login address immediately.
+                    </small>
+                  )}
                 </div>
+
+                {/* Confirmation step shown after first submit click when email changed */}
+                {showEmailConfirm && (
+                  <div className="form-group" style={{ gridColumn: '1 / -1' }}>
+                    <div style={{
+                      background: '#fef3c7', border: '1px solid #f59e0b',
+                      borderRadius: 8, padding: '0.875rem 1rem',
+                    }}>
+                      <p style={{ margin: '0 0 0.5rem', fontWeight: 600, color: '#92400e' }}>
+                        Confirm email change
+                      </p>
+                      <p style={{ margin: '0 0 0.75rem', fontSize: '0.875rem', color: '#78350f' }}>
+                        Changing from <strong>{selectedUser.email}</strong> to <strong>{editEmail.trim()}</strong>.
+                        The staff member must use the new address to log in.
+                      </p>
+                      <div style={{ display: 'flex', gap: '0.75rem' }}>
+                        <button
+                          type="submit"
+                          className="btn btn-primary"
+                          style={{ fontSize: '0.875rem', padding: '0.4rem 1rem' }}
+                        >
+                          Yes, change email & save
+                        </button>
+                        <button
+                          type="button"
+                          className="btn btn-secondary"
+                          style={{ fontSize: '0.875rem', padding: '0.4rem 1rem' }}
+                          onClick={() => setShowEmailConfirm(false)}
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
                 
                 <div className="form-group">
                   <label className="form-label">Phone</label>
@@ -935,15 +1089,53 @@ const UserManagement = () => {
                   <select
                     className="form-select"
                     value={selectedUser.role}
-                    onChange={(e) => setSelectedUser({...selectedUser, role: e.target.value as 'employee' | 'hod' | 'hr_admin'})}
+                    onChange={(e) => setSelectedUser({...selectedUser, role: e.target.value as AppRole})}
                     required
                   >
                     <option value="employee">Employee</option>
-                    <option value="hod">HOD</option>
+                    <option value="hod">Head of Department (HOD)</option>
                     <option value="hr_admin">HR Admin</option>
+                    <option value="super_admin">Super Admin</option>
+                    <option value="finance">Finance Officer</option>
+                    <option value="ceo">CEO</option>
+                    <option value="auditor">Auditor</option>
+                    <option value="fleet_manager">Fleet Manager</option>
+                    <option value="driver">Driver</option>
                   </select>
+                  <small className="form-help" style={{ marginTop: 4, display: 'block' }}>
+                    {selectedUser.role === 'employee'      && 'Standard staff — leave, attendance, documents, trip requests, payslips.'}
+                    {selectedUser.role === 'hod'           && 'Approves leave & trip requests for their department. Can manage OOO assignments.'}
+                    {selectedUser.role === 'hr_admin'      && 'Full HR access — users, payroll, attendance, OOO, fleet oversight.'}
+                    {selectedUser.role === 'super_admin'   && 'All permissions including system settings. Use sparingly.'}
+                    {selectedUser.role === 'finance'       && 'Reviews and approves payroll runs at the Finance stage. Views KRA exports and analytics.'}
+                    {selectedUser.role === 'ceo'           && 'Final payroll approver. Views analytics and HR/fleet reports.'}
+                    {selectedUser.role === 'fleet_manager' && 'Manages vehicles, drivers, trips, fuel, maintenance, and compliance.'}
+                    {selectedUser.role === 'driver'        && 'Views assigned trips, logs fuel, submits inspections, and records mileage.'}
+                  </small>
                 </div>
-                
+
+                <div className="form-group">
+                  <label className="form-label">Secondary Role <span style={{ color: '#94a3b8', fontWeight: 400 }}>(optional)</span></label>
+                  <select
+                    className="form-select"
+                    value={selectedUser.secondary_role || ''}
+                    onChange={(e) => setSelectedUser({...selectedUser, secondary_role: (e.target.value as AppRole) || null})}
+                  >
+                    <option value="">None</option>
+                    <option value="employee">Employee</option>
+                    <option value="hod">Head of Department (HOD)</option>
+                    <option value="hr_admin">HR Admin</option>
+                    <option value="finance">Finance Officer</option>
+                    <option value="ceo">CEO</option>
+                    <option value="auditor">Auditor</option>
+                    <option value="fleet_manager">Fleet Manager</option>
+                    <option value="driver">Driver</option>
+                  </select>
+                  <small className="form-help" style={{ marginTop: 4, display: 'block' }}>
+                    Grants additional menu access. E.g. a Finance Officer who is also HOD Finance.
+                  </small>
+                </div>
+
                 <div className="form-group checkbox-group">
                   <label className="checkbox-label">
                     <input
@@ -962,6 +1154,7 @@ const UserManagement = () => {
                   onClick={() => {
                     setShowEditModal(false);
                     setSelectedUser(null);
+                    setShowEmailConfirm(false);
                   }}
                   className="btn btn-secondary"
                 >

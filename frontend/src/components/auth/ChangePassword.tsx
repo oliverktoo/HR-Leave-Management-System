@@ -1,10 +1,8 @@
 import { useState, FormEvent, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
 import { supabase } from '../../lib/supabaseClient';
 import { useAuth } from '../../hooks/useAuth';
 
 export const ChangePassword = () => {
-  const navigate = useNavigate();
   const { profile } = useAuth();
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
@@ -80,7 +78,7 @@ export const ChangePassword = () => {
 
       // If this was a forced password change, clear the flag
       if (isForced) {
-        const { data, error: clearError } = await supabase.rpc('clear_must_change_password');
+        const { data: _data, error: clearError } = await supabase.rpc('clear_must_change_password');
         if (clearError) {
           console.error('Error clearing password flag:', clearError);
         }

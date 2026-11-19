@@ -4,6 +4,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { AdminSidebar } from '../admin/AdminSidebar';
+import NotificationBell from '../notifications/NotificationBell';
 import { getTripRequests } from '../../services/fleetService';
 import { TripRequest, TripRequestStatus } from '../../types/fleet';
 
@@ -84,9 +85,12 @@ export function AllTripRequests() {
       <AdminSidebar />
       <main className="admin-main">
         <div className="admin-container">
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1.5rem' }}>
+            <h1>📋 All Trip Requests</h1>
+            <NotificationBell />
+          </div>
           <header className="page-header">
             <div className="header-content">
-              <h1>📋 All Trip Requests</h1>
               <p className="header-subtitle">View and manage all trip requests across the organization</p>
             </div>
           </header>
@@ -198,13 +202,13 @@ export function AllTripRequests() {
                       <td>
                         <div className="destination-info">
                           <span className="destination">{request.destination}</span>
-                          <small className="purpose">{request.purpose.substring(0, 50)}...</small>
+                          <small className="purpose">{request.purpose.length > 50 ? request.purpose.substring(0, 50) + '…' : request.purpose}</small>
                         </div>
                       </td>
                       <td>
                         <div className="datetime-info">
-                          <span>{new Date(request.start_datetime).toLocaleDateString()}</span>
-                          <small>{new Date(request.start_datetime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</small>
+                          <span>{new Date(request.start_datetime).toLocaleDateString('en-GB', { timeZone: 'Africa/Nairobi', day: '2-digit', month: 'short', year: 'numeric' })}</span>
+                          <small>{new Date(request.start_datetime).toLocaleTimeString('en-GB', { timeZone: 'Africa/Nairobi', hour: '2-digit', minute: '2-digit' })}</small>
                         </div>
                       </td>
                       <td className="text-center">

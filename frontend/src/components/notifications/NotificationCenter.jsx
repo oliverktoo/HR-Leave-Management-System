@@ -112,14 +112,22 @@ const NotificationCenter = ({ isOpen, onClose }) => {
 
   const getNotificationIcon = (type) => {
     switch (type) {
-      case 'leave_request':
-        return '📋';
-      case 'approval':
-        return '✅';
-      case 'rejection':
-        return '❌';
-      default:
-        return '🔔';
+      case 'leave_request':    return '📋';
+      case 'leave_approved':   return '✅';
+      case 'leave_rejected':   return '❌';
+      case 'leave_cancelled':  return '🚫';
+      case 'approval':         return '✅';
+      case 'rejection':        return '❌';
+      case 'trip_approved':    return '🚗';
+      case 'trip_assigned':    return '🚗';
+      case 'trip_rejected':    return '❌';
+      case 'trip_completed':   return '🏁';
+      case 'fleet':            return '🚗';
+      case 'payroll':          return '💰';
+      case 'document':         return '📄';
+      case 'attendance':       return '🕐';
+      case 'system':           return 'ℹ️';
+      default:                 return '🔔';
     }
   };
 

@@ -12,18 +12,59 @@ const STORAGE_BUCKET = 'hr-documents';
 // Document Type Operations
 // ============================================================================
 
-export const getDocumentTypes = async (): Promise<ServiceResponse<DocumentType[]>> => {
+// staffOnly=true returns only types marked show_to_staff (used in StaffDocuments)
+// staffOnly=false returns all active types (used in AdminDocuments)
+export const getDocumentTypes = async (staffOnly = false): Promise<ServiceResponse<DocumentType[]>> => {
   try {
-    const { data, error } = await supabase
+    let query = supabase
       .from('document_types')
       .select('*')
       .eq('is_active', true)
-      .order('display_name');
+      .order('sort_order', { ascending: true });
 
+    if (staffOnly) {
+      query = query.eq('show_to_staff', true);
+    }
+
+    const { data, error } = await query;
     if (error) throw error;
     return { data: data || [], error: null };
   } catch (error) {
     console.error('Error fetching document types:', error);
+    return { data: null, error: error as Error };
+  }
+};
+
+export const updateDocumentTypeStaffVisibility = async (
+  id: string,
+  show_to_staff: boolean
+): Promise<ServiceResponse<void>> => {
+  try {
+    const { error } = await supabase
+      .from('document_types')
+      .update({ show_to_staff })
+      .eq('id', id);
+    if (error) throw error;
+    return { data: undefined, error: null };
+  } catch (error) {
+    console.error('Error updating staff visibility:', error);
+    return { data: null, error: error as Error };
+  }
+};
+
+export const updateDocumentTypeRequired = async (
+  id: string,
+  is_required: boolean
+): Promise<ServiceResponse<void>> => {
+  try {
+    const { error } = await supabase
+      .from('document_types')
+      .update({ is_required })
+      .eq('id', id);
+    if (error) throw error;
+    return { data: undefined, error: null };
+  } catch (error) {
+    console.error('Error updating mandatory status:', error);
     return { data: null, error: error as Error };
   }
 };
@@ -282,4 +323,116 @@ export const formatFileSize = (bytes: number): string => {
   const sizes = ['Bytes', 'KB', 'MB', 'GB'];
   const i = Math.floor(Math.log(bytes) / Math.log(k));
   return Math.round(bytes / Math.pow(k, i) * 100) / 100 + ' ' + sizes[i];
+};
+
+// ============================================================================
+// Company Documents (HR-to-all-staff shared documents)
+// ============================================================================
+
+const COMPANY_BUCKET = 'company-documents';
+
+export interface CompanyDocument {
+  id: string;
+  title: string;
+  description?: string;
+  category: string;
+  file_path: string;
+  file_name: string;
+  file_size: number;
+  mime_type: string;
+  uploaded_by?: string;
+  uploader?: { first_name: string; last_name: string };
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export const COMPANY_DOC_CATEGORIES = [
+  'Policy',
+  'Handbook',
+  'Form',
+  'Circular',
+  'Announcement',
+  'Training Material',
+  'Finance',
+  'General',
+] as const;
+
+export const getCompanyDocuments = async (): Promise<ServiceResponse<CompanyDocument[]>> => {
+  try {
+    const { data, error } = await supabase
+      .from('company_documents')
+      .select('*, uploader:uploaded_by(first_name, last_name)')
+      .eq('is_active', true)
+      .order('created_at', { ascending: false });
+    if (error) throw error;
+    return { data: (data || []) as CompanyDocument[], error: null };
+  } catch (error) {
+    return { data: null, error: error as Error };
+  }
+};
+
+export const uploadCompanyDocument = async (
+  title: string,
+  description: string,
+  category: string,
+  file: File
+): Promise<ServiceResponse<CompanyDocument>> => {
+  try {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) throw new Error('Not authenticated');
+
+    const ext = file.name.split('.').pop();
+    const filePath = `${Date.now()}_${file.name.replace(/\s+/g, '_')}`;
+
+    const { error: storageError } = await supabase.storage
+      .from(COMPANY_BUCKET)
+      .upload(filePath, file, { cacheControl: '3600', upsert: false });
+    if (storageError) throw storageError;
+
+    const { data, error } = await supabase
+      .from('company_documents')
+      .insert({
+        title,
+        description,
+        category,
+        file_path: filePath,
+        file_name: file.name,
+        file_size: file.size,
+        mime_type: file.type || `application/${ext}`,
+        uploaded_by: user.id,
+      })
+      .select('*, uploader:uploaded_by(first_name, last_name)')
+      .single();
+    if (error) throw error;
+    return { data: data as CompanyDocument, error: null };
+  } catch (error) {
+    return { data: null, error: error as Error };
+  }
+};
+
+export const getCompanyDocumentUrl = async (filePath: string): Promise<ServiceResponse<string>> => {
+  try {
+    const { data, error } = await supabase.storage
+      .from(COMPANY_BUCKET)
+      .createSignedUrl(filePath, 300); // 5-min signed URL
+    if (error) throw error;
+    return { data: data.signedUrl, error: null };
+  } catch (error) {
+    return { data: null, error: error as Error };
+  }
+};
+
+export const deleteCompanyDocument = async (doc: CompanyDocument): Promise<ServiceResponse<void>> => {
+  try {
+    await supabase.storage.from(COMPANY_BUCKET).remove([doc.file_path]);
+    const { error } = await supabase
+      .from('company_documents')
+      .update({ is_active: false })
+      .eq('id', doc.id);
+    if (error) throw error;
+    return { data: undefined, error: null };
+  } catch (error) {
+    return { data: null, error: error as Error };
+  }
 };

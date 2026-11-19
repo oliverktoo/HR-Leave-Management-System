@@ -12,14 +12,17 @@ export const ProtectedRoute = ({ children, allowedRoles = [] }: ProtectedRoutePr
   const { user, profile, loading } = useAuth();
   const location = useLocation();
 
+  const userRoles = [profile?.role, profile?.secondary_role].filter(Boolean) as UserRole[];
+
   // Debug logging
   console.log('🔐 ProtectedRoute Check:', {
     path: location.pathname,
     loading,
     hasUser: !!user,
     profileRole: profile?.role,
+    secondaryRole: profile?.secondary_role,
     allowedRoles,
-    isAllowed: allowedRoles.length === 0 || allowedRoles.includes(profile?.role as UserRole)
+    isAllowed: allowedRoles.length === 0 || userRoles.some(r => allowedRoles.includes(r))
   });
 
   if (loading) {
@@ -45,12 +48,12 @@ export const ProtectedRoute = ({ children, allowedRoles = [] }: ProtectedRoutePr
     return <Navigate to="/change-password" replace />;
   }
 
-  if (allowedRoles.length > 0 && !allowedRoles.includes(profile?.role as UserRole)) {
+  if (allowedRoles.length > 0 && !userRoles.some(r => allowedRoles.includes(r))) {
     console.error('❌ Access Denied:', {
       path: location.pathname,
       userRole: profile?.role,
+      secondaryRole: profile?.secondary_role,
       allowedRoles,
-      roleType: typeof profile?.role
     });
     return <Navigate to="/unauthorized" replace />;
   }

@@ -1,0 +1,35 @@
+name: Auto Checkout (8pm EAT)
+
+# Triggers at 17:00 UTC = 20:00 EAT every day (Mon–Fri)
+# Also runs at 17:05 UTC as a safety retry
+on:
+  schedule:
+    - cron: '0 17 * * 1-5'    # 8:00pm EAT, weekdays
+    - cron: '5 17 * * 1-5'    # 8:05pm EAT retry
+    - cron: '0 17 * * 0,6'    # 8:00pm EAT, weekends (in case staff work weekends)
+  workflow_dispatch:           # allow manual trigger from GitHub Actions UI
+
+jobs:
+  auto-checkout:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger auto-checkout Edge Function
+        run: |
+          RESPONSE=$(curl -s -w "\n%{http_code}" -X POST \
+            "${{ secrets.SUPABASE_URL }}/functions/v1/auto-checkout" \
+            -H "Authorization: Bearer ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}" \
+            -H "Content-Type: application/json" \
+            -d '{}')
+
+          HTTP_BODY=$(echo "$RESPONSE" | head -n -1)
+          HTTP_CODE=$(echo "$RESPONSE" | tail -n 1)
+
+          echo "Response: $HTTP_BODY"
+          echo "HTTP Status: $HTTP_CODE"
+
+          if [ "$HTTP_CODE" != "200" ]; then
+            echo "❌ Auto-checkout failed with status $HTTP_CODE"
+            exit 1
+          else
+            echo "✅ Auto-checkout completed successfully"
+          fi

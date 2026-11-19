@@ -213,12 +213,21 @@ export function TripRequestModal({ isOpen, onClose, onSuccess }: TripRequestModa
           <div className="step-content">
             <div className="form-group">
               <label className="required">Pickup Location</label>
+              <div className="pickup-presets">
+                <button
+                  type="button"
+                  className={`preset-btn${formData.pickup_location === 'Football Kenya Federation, Kandanda House' ? ' active' : ''}`}
+                  onClick={() => handleChange('pickup_location', 'Football Kenya Federation, Kandanda House')}
+                >
+                  🏢 FKF Kandanda House
+                </button>
+              </div>
               <input
                 type="text"
                 className="form-control"
                 value={formData.pickup_location}
                 onChange={(e) => handleChange('pickup_location', e.target.value)}
-                placeholder="e.g., FKF House, Kasarani"
+                placeholder="Or type a different pickup location..."
               />
             </div>
 
@@ -400,13 +409,13 @@ export function TripRequestModal({ isOpen, onClose, onSuccess }: TripRequestModa
               <div className="review-item">
                 <span className="review-label">Departure:</span>
                 <span className="review-value">
-                  {new Date(formData.start_datetime).toLocaleString()}
+                  {new Date(formData.start_datetime).toLocaleString('en-GB', { timeZone: 'Africa/Nairobi', day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
                 </span>
               </div>
               <div className="review-item">
                 <span className="review-label">Return:</span>
                 <span className="review-value">
-                  {new Date(formData.end_datetime).toLocaleString()}
+                  {new Date(formData.end_datetime).toLocaleString('en-GB', { timeZone: 'Africa/Nairobi', day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
                 </span>
               </div>
               <div className="review-item">

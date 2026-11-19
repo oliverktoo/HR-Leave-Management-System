@@ -7,6 +7,8 @@ import { useState, useEffect } from 'react';
 import { supabase } from '../../lib/supabaseClient';
 import { clearGeofenceCache } from '../../config/geofenceConfig';
 import './GeofenceSettings.css';
+import { AdminSidebar } from './AdminSidebar';
+import NotificationBell from '../notifications/NotificationBell';
 
 interface OfficeLocation {
   id?: number;
@@ -319,9 +321,15 @@ export const GeofenceSettings = () => {
   }
 
   return (
+    <div className="admin-layout">
+      <AdminSidebar />
+      <div className="admin-main" style={{ padding: '2rem' }}>
     <div className="geofence-settings">
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1.5rem' }}>
+        <h1 style={{ fontSize: '1.5rem', fontWeight: 700, color: 'var(--gray-900)', margin: 0 }}>📍 Office Locations & Geofencing</h1>
+        <NotificationBell />
+      </div>
       <div className="settings-header">
-        <h2>📍 Office Locations & Geofencing</h2>
         <p className="settings-description">
           Manage multiple office locations with automatic check-in notifications for mobile staff
         </p>
@@ -809,15 +817,16 @@ export const GeofenceSettings = () => {
           <h4>ℹ️ Important Information:</h4>
           <ul>
             <li>📱 Changes apply to all mobile app users after they restart the app</li>
-            <li>🔐 Background geofencing requires "Always Allow" location permission</li>
-            <li>⏱️ Geofence triggers may have a 2-5 minute delay depending on device</li>
-            <li>🏢 Multiple locations: Staff get notifications at whichever office they arrive at</li>
+            <li>🏢 Multiple locations: Staff can check in at whichever configured office they are at</li>
             <li>✅ Use "Default" location to prioritize which office appears first in the app</li>
             <li>📍 For best accuracy, use "Use Current Location" while physically at the office</li>
-            <li>⏰ Auto-checkout settings apply to all locations and run daily at scheduled times</li>
+            <li>⏰ End-of-day and grace-period auto-checkout run as scheduled database jobs</li>
+            <li>⚠️ <strong>Geofence Exit Auto-Checkout</strong> requires background location — this feature is not yet active and will be enabled in a future update</li>
           </ul>
         </div>
       )}
+    </div>
+      </div>
     </div>
   );
 };

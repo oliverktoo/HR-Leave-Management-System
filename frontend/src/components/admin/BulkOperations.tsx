@@ -413,14 +413,14 @@ const BulkOperations = () => {
     switch (operationType) {
       case 'import_users':
         csvContent = 'email,full_name,employee_id,department_id,role,phone,password\n';
-        csvContent += 'john.doe@company.com,John Doe,EMP001,1,employee,+254700000000,TempPass123!\n';
-        csvContent += 'jane.smith@company.com,Jane Smith,EMP002,2,hod,+254700000001,TempPass123!\n';
+        csvContent += 'john.doe@company.com,John Doe,FKF001,1,employee,+254700000000,TempPass123!\n';
+        csvContent += 'jane.smith@company.com,Jane Smith,FKF002,2,hod,+254700000001,TempPass123!\n';
         break;
       case 'update_leave_balances':
         csvContent = 'employee_id,leave_type,balance\n';
-        csvContent += 'EMP001,Annual Leave,21\n';
-        csvContent += 'EMP001,Sick Leave,10\n';
-        csvContent += 'EMP002,Annual Leave,21\n';
+        csvContent += 'FKF001,Annual Leave,21\n';
+        csvContent += 'FKF001,Sick Leave,10\n';
+        csvContent += 'FKF002,Annual Leave,21\n';
         break;
       default:
         return;

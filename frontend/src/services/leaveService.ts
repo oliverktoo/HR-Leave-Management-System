@@ -232,6 +232,7 @@ export const submitLeaveRequest = async (
       end_date: requestData.end_date,
       total_days: requestData.total_days,
       reason: requestData.reason,
+      cover_person: requestData.cover_person,
       document_url: requestData.document_url || null,
       status: 'pending' as LeaveRequestStatus,
     };
@@ -266,6 +267,15 @@ export const getLeaveRequests = async (
         reviewed_by_user:users_profile!leave_requests_reviewed_by_fkey (
           first_name,
           last_name
+        ),
+        users_profile:user_id (
+          first_name,
+          last_name,
+          employee_id,
+          department_id,
+          department:departments!users_profile_department_id_fkey (
+            name
+          )
         )
       `)
       .eq('user_id', userId)
@@ -354,7 +364,8 @@ export const getPendingRequestsForApproval = async (
           last_name,
           employee_id,
           job_title,
-          department_id
+          department_id,
+          department:departments!users_profile_department_id_fkey (name)
         ),
         leave_types:leave_type_id (
           name,
@@ -394,11 +405,16 @@ export const getRequestsForHRApproval = async (): Promise<ServiceResponse<LeaveR
           last_name,
           employee_id,
           job_title,
-          department_id
+          department_id,
+          department:departments!users_profile_department_id_fkey (name)
         ),
         leave_types:leave_type_id (
           name,
           color
+        ),
+        hod_approver:users_profile!leave_requests_hod_approved_by_fkey (
+          first_name,
+          last_name
         ),
         reviewed_by_user:reviewed_by (
           first_name,
@@ -565,6 +581,69 @@ export const cancelLeaveRequest = async (
     return { data: data as LeaveRequest, error: null };
   } catch (error) {
     console.error('Cancel leave request error:', error);
+    return { data: null, error: error as Error };
+  }
+};
+
+// Get all currently-approved leave requests across all staff (for HR recall UI)
+export const getApprovedLeaveRequests = async (): Promise<ServiceResponse<LeaveRequest[]>> => {
+  try {
+    const { data, error } = await supabase
+      .from('leave_requests')
+      .select(`
+        *,
+        users_profile:user_id (
+          first_name,
+          last_name,
+          employee_id,
+          job_title,
+          department_id,
+          department:departments!users_profile_department_id_fkey (name)
+        ),
+        leave_types:leave_type_id (
+          name,
+          color
+        ),
+        hod_approver:users_profile!leave_requests_hod_approved_by_fkey (
+          first_name,
+          last_name
+        )
+      `)
+      .eq('status', 'approved')
+      .order('start_date', { ascending: true });
+
+    if (error) throw error;
+    return { data: data as LeaveRequest[], error: null };
+  } catch (error) {
+    console.error('Get approved leave requests error:', error);
+    return { data: null, error: error as Error };
+  }
+};
+
+// Recall an already-approved leave request (HR admin / super admin only).
+// effectiveDate (YYYY-MM-DD) is the date the recall takes effect — it can be
+// in the past (recording a recall filed after the fact) or a future date
+// within the leave period. If it's on/before the leave's start date, the full
+// balance is restored; otherwise elapsed working days stay counted as used
+// and only the remaining days are restored — computed server-side by the RPC.
+export const recallApprovedLeave = async (
+  requestId: string,
+  adminId: string,
+  reason: string,
+  effectiveDate: string
+): Promise<ServiceResponse<LeaveRequest>> => {
+  try {
+    const { data, error } = await supabase.rpc('recall_leave_request', {
+      p_request_id: requestId,
+      p_admin_id: adminId,
+      p_reason: reason,
+      p_effective_date: effectiveDate,
+    });
+
+    if (error) throw error;
+    return { data: data as LeaveRequest, error: null };
+  } catch (error) {
+    console.error('Recall leave request error:', error);
     return { data: null, error: error as Error };
   }
 };

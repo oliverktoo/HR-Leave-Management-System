@@ -100,7 +100,8 @@ export const LeaveHistory = () => {
       hod_approved: 'status-badge status-info',
       approved: 'status-badge status-approved',
       rejected: 'status-badge status-rejected',
-      cancelled: 'status-badge status-cancelled'
+      cancelled: 'status-badge status-cancelled',
+      recalled: 'status-badge status-recalled'
     };
     return badges[status] || 'status-badge';
   };
@@ -111,7 +112,8 @@ export const LeaveHistory = () => {
       hod_approved: 'HOD Approved',
       approved: 'Approved',
       rejected: 'Rejected',
-      cancelled: 'Cancelled'
+      cancelled: 'Cancelled',
+      recalled: 'Recalled'
     };
     return labels[status] || status;
   };
@@ -275,6 +277,7 @@ export const LeaveHistory = () => {
                 <option value="approved">✅ Approved</option>
                 <option value="rejected">❌ Rejected</option>
                 <option value="cancelled">🚫 Cancelled</option>
+                <option value="recalled">↩️ Recalled</option>
               </select>
             </div>
 
@@ -489,6 +492,20 @@ export const LeaveHistory = () => {
                     <div className="detail-row">
                       <span className="detail-label">Rejection Reason:</span>
                       <span className="detail-value text-danger">{selectedRequest.rejection_reason}</span>
+                    </div>
+                  )}
+
+                  {selectedRequest.status === 'recalled' && selectedRequest.recall_reason && (
+                    <div className="detail-row">
+                      <span className="detail-label">Recall Reason:</span>
+                      <span className="detail-value">{selectedRequest.recall_reason}</span>
+                    </div>
+                  )}
+
+                  {selectedRequest.status === 'recalled' && selectedRequest.recall_effective_date && (
+                    <div className="detail-row">
+                      <span className="detail-label">Recalled Effective:</span>
+                      <span className="detail-value">{formatDate(selectedRequest.recall_effective_date)}</span>
                     </div>
                   )}
 

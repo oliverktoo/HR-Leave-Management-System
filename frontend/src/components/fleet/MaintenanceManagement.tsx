@@ -3,6 +3,7 @@
 
 import { useState, useEffect } from 'react';
 import { AdminSidebar } from '../admin/AdminSidebar';
+import NotificationBell from '../notifications/NotificationBell';
 import {
   getMaintenanceRecords,
   createMaintenanceRecord,
@@ -13,7 +14,6 @@ import {
 import { getVehicles } from '../../services/fleetService';
 import { MaintenanceRecord, CreateMaintenanceInput, MaintenanceFilters } from '../../types/fleetPhase2';
 import { FleetVehicle } from '../../types/fleet';
-import { useAuth } from '../../hooks/useAuth';
 
 export function MaintenanceManagement() {
   
@@ -191,17 +191,19 @@ export function MaintenanceManagement() {
   return (
     <div className="admin-layout">
       <AdminSidebar />
-      <main className="admin-main">
-        <div className="admin-container">
-          <header className="admin-header">
-            <div>
-              <h1>🔧 Maintenance Management</h1>
-              <p className="admin-subtitle">Schedule and track vehicle maintenance</p>
-            </div>
-            <button className="btn btn-primary" onClick={() => setShowForm(true)}>
-              + Schedule Maintenance
-            </button>
-          </header>
+      <div className="admin-main">
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1.5rem' }}>
+          <h1 className="page-title">🔧 Maintenance Management</h1>
+          <NotificationBell />
+        </div>
+        <div className="page-header">
+          <div className="header-content">
+            <p className="page-subtitle">Schedule and track vehicle maintenance</p>
+          </div>
+          <button className="btn btn-primary" onClick={() => setShowForm(true)}>
+            + Schedule Maintenance
+          </button>
+        </div>
 
           {error && (
             <div className="alert alert-error mb-4">
@@ -253,7 +255,7 @@ export function MaintenanceManagement() {
               <ul className="mt-2">
                 {upcoming.slice(0, 3).map(m => (
                   <li key={m.id}>
-                    {m.vehicle?.plate_number}: {m.description} (Due: {m.scheduled_date ? new Date(m.scheduled_date).toLocaleDateString() : 'TBD'})
+                    {m.vehicle?.plate_number}: {m.description} (Due: {m.scheduled_date ? new Date(m.scheduled_date).toLocaleDateString('en-GB', { timeZone: 'Africa/Nairobi', day: '2-digit', month: 'short', year: 'numeric' }) : 'TBD'})
                   </li>
                 ))}
               </ul>
@@ -270,9 +272,9 @@ export function MaintenanceManagement() {
                 </div>
                 <div className="modal-body">
                   <div className="form-group">
-                    <label className="required">Vehicle</label>
+                    <label className="form-label required">Vehicle</label>
                     <select
-                      className="form-control"
+                      className="form-select"
                       value={vehicleId}
                       onChange={(e) => setVehicleId(e.target.value)}
                       disabled={!!editingId}
@@ -287,8 +289,8 @@ export function MaintenanceManagement() {
                   </div>
                   <div className="form-row">
                     <div className="form-group">
-                      <label className="required">Type</label>
-                      <select className="form-control" value={maintenanceType} onChange={(e) => setMaintenanceType(e.target.value as any)}>
+                      <label className="form-label required">Type</label>
+                      <select className="form-select" value={maintenanceType} onChange={(e) => setMaintenanceType(e.target.value as any)}>
                         <option value="service">Routine Service</option>
                         <option value="repair">Repair</option>
                         <option value="inspection">Inspection</option>
@@ -297,8 +299,8 @@ export function MaintenanceManagement() {
                       </select>
                     </div>
                     <div className="form-group">
-                      <label className="required">Priority</label>
-                      <select className="form-control" value={priority} onChange={(e) => setPriority(e.target.value as any)}>
+                      <label className="form-label required">Priority</label>
+                      <select className="form-select" value={priority} onChange={(e) => setPriority(e.target.value as any)}>
                         <option value="low">Low</option>
                         <option value="normal">Normal</option>
                         <option value="high">High</option>
@@ -307,59 +309,59 @@ export function MaintenanceManagement() {
                     </div>
                   </div>
                   <div className="form-group">
-                    <label className="required">Description</label>
+                    <label className="form-label required">Description</label>
                     <textarea
-                      className="form-control"
+                      className="form-input"
                       value={description}
                       onChange={(e) => setDescription(e.target.value)}
                       rows={3}
                     />
                   </div>
                   <div className="form-group">
-                    <label className="required">Scheduled Date</label>
+                    <label className="form-label required">Scheduled Date</label>
                     <input
                       type="date"
-                      className="form-control"
+                      className="form-input"
                       value={scheduledDate}
                       onChange={(e) => setScheduledDate(e.target.value)}
                     />
                   </div>
                   <div className="form-row">
                     <div className="form-group">
-                      <label>Labor Cost</label>
+                      <label className="form-label">Labor Cost</label>
                       <input
                         type="number"
                         step="0.01"
-                        className="form-control"
+                        className="form-input"
                         value={laborCost}
                         onChange={(e) => setLaborCost(e.target.value)}
                       />
                     </div>
                     <div className="form-group">
-                      <label>Parts Cost</label>
+                      <label className="form-label">Parts Cost</label>
                       <input
                         type="number"
                         step="0.01"
-                        className="form-control"
+                        className="form-input"
                         value={partsCost}
                         onChange={(e) => setPartsCost(e.target.value)}
                       />
                     </div>
                   </div>
                   <div className="form-group">
-                    <label>Service Provider</label>
+                    <label className="form-label">Service Provider</label>
                     <input
                       type="text"
-                      className="form-control"
+                      className="form-input"
                       value={serviceProvider}
                       onChange={(e) => setServiceProvider(e.target.value)}
                       placeholder="e.g., ABC Auto Service"
                     />
                   </div>
                   <div className="form-group">
-                    <label>Notes</label>
+                    <label className="form-label">Notes</label>
                     <textarea
-                      className="form-control"
+                      className="form-input"
                       value={notes}
                       onChange={(e) => setNotes(e.target.value)}
                       rows={3}
@@ -378,20 +380,20 @@ export function MaintenanceManagement() {
 
           {/* Filters */}
           <div className="filters-bar mb-4">
-            <select className="form-control" value={filterVehicle} onChange={(e) => setFilterVehicle(e.target.value)}>
+            <select className="form-select" value={filterVehicle} onChange={(e) => setFilterVehicle(e.target.value)}>
               <option value="">All Vehicles</option>
               {vehicles.map(v => (
                 <option key={v.id} value={v.id}>{v.plate_number}</option>
               ))}
             </select>
-            <select className="form-control" value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)}>
+            <select className="form-select" value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)}>
               <option value="">All Status</option>
               <option value="scheduled">Scheduled</option>
               <option value="in_progress">In Progress</option>
               <option value="completed">Completed</option>
               <option value="cancelled">Cancelled</option>
             </select>
-            <select className="form-control" value={filterType} onChange={(e) => setFilterType(e.target.value)}>
+            <select className="form-select" value={filterType} onChange={(e) => setFilterType(e.target.value)}>
               <option value="">All Types</option>
               <option value="service">Routine Service</option>
               <option value="repair">Repair</option>
@@ -434,8 +436,8 @@ export function MaintenanceManagement() {
                           {record.priority}
                         </span>
                       </td>
-                      <td>{record.scheduled_date ? new Date(record.scheduled_date).toLocaleDateString() : 'TBD'}</td>
-                      <td>{record.completed_date ? new Date(record.completed_date).toLocaleDateString() : '-'}</td>
+                      <td>{record.scheduled_date ? new Date(record.scheduled_date).toLocaleDateString('en-GB', { timeZone: 'Africa/Nairobi', day: '2-digit', month: 'short', year: 'numeric' }) : 'TBD'}</td>
+                      <td>{record.completed_date ? new Date(record.completed_date).toLocaleDateString('en-GB', { timeZone: 'Africa/Nairobi', day: '2-digit', month: 'short', year: 'numeric' }) : '-'}</td>
                       <td>${record.total_cost?.toFixed(2) || '0.00'}</td>
                       <td>{record.service_provider || 'N/A'}</td>
                       <td>
@@ -476,8 +478,7 @@ export function MaintenanceManagement() {
               </table>
             )}
           </div>
-        </div>
-      </main>
+      </div>
     </div>
   );
 }

@@ -1,12 +1,14 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../hooks/useAuth';
-import { 
-  getPendingRequestsForApproval, 
+import {
+  getPendingRequestsForApproval,
   getRequestsForHRApproval,
   approveAsHOD,
   approveAsHR,
-  rejectLeaveRequest
+  rejectLeaveRequest,
+  getApprovedLeaveRequests,
+  recallApprovedLeave
 } from '../../services/leaveService';
 import { generateLeaveReport } from '../../services/pdfService';
 import { supabase } from '../../lib/supabaseClient';
@@ -17,12 +19,17 @@ export const Approvals = () => {
   const { user, profile } = useAuth();
   const navigate = useNavigate();
   const [requests, setRequests] = useState([]);
+  const [approvedRequests, setApprovedRequests] = useState([]);
+  const [recallSearchTerm, setRecallSearchTerm] = useState('');
+  const [recallEffectiveDate, setRecallEffectiveDate] = useState('');
   const [loading, setLoading] = useState(true);
   const [processingId, setProcessingId] = useState(null);
   const [selectedRequest, setSelectedRequest] = useState(null);
   const [showApprovalModal, setShowApprovalModal] = useState(false);
   const [modalAction, setModalAction] = useState(null);
   const [comments, setComments] = useState('');
+
+  const isHRorAdmin = profile?.role === 'hr_admin' || profile?.role === 'super_admin';
   const [stats, setStats] = useState({
     pending: 0,
     hodApproved: 0,
@@ -55,6 +62,9 @@ export const Approvals = () => {
       return;
     }
     loadPendingRequests();
+    if (profile?.role === 'hr_admin' || profile?.role === 'super_admin') {
+      loadApprovedRequests();
+    }
   }, [profile]);
 
   const loadPendingRequests = async () => {
@@ -111,10 +121,25 @@ export const Approvals = () => {
     setLoading(false);
   };
 
+  const loadApprovedRequests = async () => {
+    const { data, error } = await getApprovedLeaveRequests();
+    if (error) {
+      console.error('Get approved requests error:', error);
+      return;
+    }
+    setApprovedRequests(data || []);
+  };
+
+  const getLocalDateString = (date) => {
+    const offsetMs = date.getTimezoneOffset() * 60000;
+    return new Date(date.getTime() - offsetMs).toISOString().slice(0, 10);
+  };
+
   const openApprovalModal = (request, action) => {
     setSelectedRequest(request);
     setModalAction(action);
     setComments('');
+    setRecallEffectiveDate(action === 'recalled' ? getLocalDateString(new Date()) : '');
     setShowApprovalModal(true);
   };
 
@@ -124,9 +149,20 @@ export const Approvals = () => {
       return;
     }
 
-    if (modalAction === 'rejected' && !comments.trim()) {
-      alert('Please provide a reason for rejection');
+    if ((modalAction === 'rejected' || modalAction === 'recalled') && !comments.trim()) {
+      alert(modalAction === 'recalled' ? 'Please provide a reason for recalling this leave' : 'Please provide a reason for rejection');
       return;
+    }
+
+    if (modalAction === 'recalled') {
+      if (!recallEffectiveDate) {
+        alert('Please select the date this recall takes effect');
+        return;
+      }
+      if (recallEffectiveDate > selectedRequest.end_date) {
+        alert('Effective date must be on or before the leave end date');
+        return;
+      }
     }
 
     setProcessingId(selectedRequest.id);
@@ -153,6 +189,9 @@ export const Approvals = () => {
         // Rejection can be done by either HOD or HR
         const role = profile.role === 'hod' ? 'hod' : 'hr_admin';
         result = await rejectLeaveRequest(selectedRequest.id, profile.id, comments, role);
+      } else if (modalAction === 'recalled') {
+        // Recalling already-approved leave is HR/super_admin only
+        result = await recallApprovedLeave(selectedRequest.id, profile.id, comments, recallEffectiveDate);
       }
 
       if (result?.error) {
@@ -161,15 +200,19 @@ export const Approvals = () => {
       } else {
         console.log('Approval action successful');
         // Trigger refresh event for other components
-        window.dispatchEvent(new CustomEvent('leaveRequestUpdated', { 
-          detail: { requestId: selectedRequest.id, action: modalAction } 
+        window.dispatchEvent(new CustomEvent('leaveRequestUpdated', {
+          detail: { requestId: selectedRequest.id, action: modalAction }
         }));
-        
-        // Refresh the list
+
+        // Refresh the lists
         await loadPendingRequests();
+        if (isHRorAdmin) {
+          await loadApprovedRequests();
+        }
         setShowApprovalModal(false);
         setSelectedRequest(null);
         setComments('');
+        setRecallEffectiveDate('');
       }
     } catch (err) {
       console.error('Unexpected error during approval action:', err);
@@ -232,8 +275,29 @@ export const Approvals = () => {
     }
   };
 
+  const modalTheme = {
+    approved: { gradient: 'linear-gradient(135deg, #10b981 0%, #059669 100%)', icon: '✓', title: 'Approve Leave Request', border: '#d1d5db', focusBorder: '#3b82f6' },
+    rejected: { gradient: 'linear-gradient(135deg, #ef4444 0%, #dc2626 100%)', icon: '✕', title: 'Reject Leave Request', border: '#ef4444', focusBorder: '#dc2626' },
+    recalled: { gradient: 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)', icon: '↩', title: 'Recall Approved Leave', border: '#f59e0b', focusBorder: '#d97706' },
+  };
+
+  const filteredApprovedRequests = useMemo(() => {
+    const term = recallSearchTerm.trim().toLowerCase();
+    if (!term) return approvedRequests;
+    return approvedRequests.filter((request) => {
+      const fullName = `${request.users_profile?.first_name || ''} ${request.users_profile?.last_name || ''}`.toLowerCase();
+      const employeeId = (request.users_profile?.employee_id || '').toLowerCase();
+      const department = (request.users_profile?.department?.name || '').toLowerCase();
+      const leaveType = (request.leave_types?.name || '').toLowerCase();
+      return fullName.includes(term) || employeeId.includes(term) || department.includes(term) || leaveType.includes(term);
+    });
+  }, [approvedRequests, recallSearchTerm]);
+
   const approvalModalContent = useMemo(() => {
     if (!showApprovalModal || !selectedRequest) return null;
+    const theme = modalTheme[modalAction] || modalTheme.approved;
+    const requiresReason = modalAction === 'rejected' || modalAction === 'recalled';
+    const missingRequired = (requiresReason && !comments.trim()) || (modalAction === 'recalled' && !recallEffectiveDate);
 
     return (
       <div 
@@ -277,21 +341,17 @@ export const Approvals = () => {
         >
           {/* Header with colored strip */}
           <div className="page-header enhanced-header" style={{
-            background: modalAction === 'approved' 
-              ? 'linear-gradient(135deg, #10b981 0%, #059669 100%)' 
-              : 'linear-gradient(135deg, #ef4444 0%, #dc2626 100%)',
+            background: theme.gradient,
             borderBottom: '3px solid rgba(255,255,255,0.3)',
             marginBottom: 0
           }}>
             <div className="header-content">
               <h1 className="page-title" style={{ color: 'white', margin: 0 }}>
-                <span className="title-icon">
-                  {modalAction === 'approved' ? '✓' : '✕'}
-                </span>
-                {modalAction === 'approved' ? 'Approve Leave Request' : 'Reject Leave Request'}
+                <span className="title-icon">{theme.icon}</span>
+                {theme.title}
               </h1>
               <p className="page-subtitle" style={{ color: 'rgba(255,255,255,0.9)' }}>
-                Review the details and {modalAction === 'approved' ? 'confirm approval' : 'provide rejection reason'}
+                Review the details and {modalAction === 'approved' ? 'confirm approval' : modalAction === 'recalled' ? 'confirm recall' : 'provide rejection reason'}
               </p>
             </div>
             <button
@@ -326,12 +386,12 @@ export const Approvals = () => {
                     <span className="info-label">Employee ID</span>
                     <span className="info-value">{formatEmployeeId(selectedRequest.users_profile?.employee_id)}</span>
                   </div>
-                  {selectedRequest.users_profile?.department?.name && (
-                    <div className="info-item">
-                      <span className="info-label">Department</span>
-                      <span className="info-value">{selectedRequest.users_profile.department.name}</span>
-                    </div>
-                  )}
+                  <div className="info-item">
+                    <span className="info-label">Department</span>
+                    <span className="info-value">
+                      {selectedRequest.users_profile?.department?.name || '—'}
+                    </span>
+                  </div>
                 </div>
               </div>
             </div>
@@ -378,7 +438,7 @@ export const Approvals = () => {
               </div>
             </div>
 
-            {/* Reason Card */}
+            {/* Reason + Cover Person Card */}
             <div className="card mb-6">
               <div className="card-header">
                 <h3 className="card-title">
@@ -388,8 +448,54 @@ export const Approvals = () => {
               </div>
               <div className="card-body">
                 <p style={{ color: '#4b5563', lineHeight: '1.6' }}>{selectedRequest.reason}</p>
+                <div style={{
+                  marginTop: '1rem', padding: '0.75rem 1rem',
+                  background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 8,
+                  display: 'flex', alignItems: 'center', gap: '0.5rem'
+                }}>
+                  <span style={{ fontWeight: 700, color: '#15803d', fontSize: 13 }}>Cover Person:</span>
+                  <span style={{ color: '#166534', fontSize: 13 }}>
+                    {selectedRequest.cover_person || <em style={{ color: '#9ca3af' }}>Not specified</em>}
+                  </span>
+                </div>
               </div>
             </div>
+
+            {/* HOD Approval info — shown to HR only when status is hod_approved */}
+            {selectedRequest.status === 'hod_approved' && selectedRequest.hod_approver && (
+              <div className="card mb-6">
+                <div className="card-header">
+                  <h3 className="card-title">
+                    <span className="title-icon">✓</span>
+                    HOD Approval
+                  </h3>
+                </div>
+                <div className="card-body">
+                  <div className="info-grid">
+                    <div className="info-item">
+                      <span className="info-label">Approved By (HOD)</span>
+                      <span className="info-value">
+                        {selectedRequest.hod_approver.first_name} {selectedRequest.hod_approver.last_name}
+                      </span>
+                    </div>
+                    <div className="info-item">
+                      <span className="info-label">HOD Approved At</span>
+                      <span className="info-value">
+                        {selectedRequest.hod_approved_at
+                          ? new Date(selectedRequest.hod_approved_at).toLocaleString('en-KE')
+                          : '—'}
+                      </span>
+                    </div>
+                    {selectedRequest.hod_comments && (
+                      <div className="info-item" style={{ gridColumn: '1 / -1' }}>
+                        <span className="info-label">HOD Comments</span>
+                        <span className="info-value">{selectedRequest.hod_comments}</span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
 
             {/* Supporting Document */}
             {selectedRequest.document_url && (
@@ -428,13 +534,42 @@ export const Approvals = () => {
               </div>
             )}
 
+            {/* Recall Effective Date — only for the recall action */}
+            {modalAction === 'recalled' && (
+              <div className="card mb-6">
+                <div className="card-header">
+                  <h3 className="card-title">
+                    <span className="title-icon">📅</span>
+                    Recall Effective Date
+                    <span style={{ color: '#ef4444', marginLeft: '0.25rem' }}>*</span>
+                  </h3>
+                </div>
+                <div className="card-body">
+                  <input
+                    type="date"
+                    value={recallEffectiveDate}
+                    max={selectedRequest.end_date}
+                    onChange={(e) => setRecallEffectiveDate(e.target.value)}
+                    disabled={processingId}
+                    className="form-input enhanced-input"
+                    style={{ maxWidth: '260px', border: `2px solid ${theme.border}` }}
+                  />
+                  <p style={{ color: '#6b7280', fontSize: '0.8125rem', marginTop: '0.5rem' }}>
+                    {recallEffectiveDate && recallEffectiveDate <= selectedRequest.start_date
+                      ? 'On or before the leave start date — the full leave balance will be restored.'
+                      : 'Days from the start of leave up to the day before this date stay counted as used; the remaining days are restored to the balance. Can be a past date if the recall already happened and you\'re recording it now.'}
+                  </p>
+                </div>
+              </div>
+            )}
+
             {/* Comments Section */}
             <div className="card mb-6">
               <div className="card-header">
                 <h3 className="card-title">
                   <span className="title-icon">✍️</span>
-                  {modalAction === 'approved' ? 'Approval Comments (Optional)' : 'Rejection Reason'}
-                  {modalAction === 'rejected' && <span style={{ color: '#ef4444', marginLeft: '0.25rem' }}>*</span>}
+                  {modalAction === 'approved' ? 'Approval Comments (Optional)' : modalAction === 'recalled' ? 'Recall Reason' : 'Rejection Reason'}
+                  {requiresReason && <span style={{ color: '#ef4444', marginLeft: '0.25rem' }}>*</span>}
                 </h3>
               </div>
               <div className="card-body" style={{ pointerEvents: 'auto' }}>
@@ -444,9 +579,9 @@ export const Approvals = () => {
                   value={comments}
                   onChange={handleCommentsChange}
                   rows="4"
-                  placeholder={modalAction === 'approved' ? 'Add any comments about this approval...' : 'Please provide a clear reason for rejecting this request...'}
+                  placeholder={modalAction === 'approved' ? 'Add any comments about this approval...' : modalAction === 'recalled' ? 'Explain why this staff member is being recalled...' : 'Please provide a clear reason for rejecting this request...'}
                   disabled={processingId}
-                  style={{ 
+                  style={{
                     width: '100%',
                     resize: 'vertical',
                     minHeight: '100px',
@@ -454,7 +589,7 @@ export const Approvals = () => {
                     fontSize: '1rem',
                     lineHeight: '1.5',
                     borderRadius: '8px',
-                    border: `2px solid ${modalAction === 'rejected' ? '#ef4444' : '#d1d5db'}`,
+                    border: `2px solid ${theme.border}`,
                     outline: 'none',
                     transition: 'border-color 0.2s',
                     pointerEvents: 'auto !important',
@@ -468,14 +603,14 @@ export const Approvals = () => {
                     fontFamily: 'inherit',
                     zIndex: 10
                   }}
-                  onFocus={(e) => e.target.style.borderColor = modalAction === 'rejected' ? '#dc2626' : '#3b82f6'}
-                  onBlur={(e) => e.target.style.borderColor = modalAction === 'rejected' ? '#ef4444' : '#d1d5db'}
+                  onFocus={(e) => e.target.style.borderColor = theme.focusBorder}
+                  onBlur={(e) => e.target.style.borderColor = theme.border}
                   onClick={(e) => e.stopPropagation()}
                   onMouseDown={(e) => e.stopPropagation()}
                 />
-                {modalAction === 'rejected' && !comments && (
+                {requiresReason && !comments && (
                   <p style={{ color: '#ef4444', fontSize: '0.875rem', marginTop: '0.5rem' }}>
-                    ⚠️ A rejection reason is required to proceed
+                    ⚠️ {modalAction === 'recalled' ? 'A recall reason is required to proceed' : 'A rejection reason is required to proceed'}
                   </p>
                 )}
               </div>
@@ -493,15 +628,15 @@ export const Approvals = () => {
               </button>
               <button
                 onClick={handleApprovalAction}
-                disabled={processingId || (modalAction === 'rejected' && !comments.trim())}
-                className={`btn ${modalAction === 'approved' ? 'btn-success' : 'btn-danger'}`}
-                title={modalAction === 'rejected' && !comments.trim() ? 'Please provide a rejection reason' : ''}
+                disabled={processingId || missingRequired}
+                className={`btn ${modalAction === 'approved' ? 'btn-success' : modalAction === 'recalled' ? 'btn-warning' : 'btn-danger'}`}
+                title={missingRequired ? (modalAction === 'recalled' ? (recallEffectiveDate ? 'Please provide a recall reason' : 'Please select the recall effective date') : 'Please provide a rejection reason') : ''}
                 style={{
-                  background: modalAction === 'approved' ? 'linear-gradient(135deg, #10b981 0%, #059669 100%)' : 'linear-gradient(135deg, #ef4444 0%, #dc2626 100%)',
+                  background: theme.gradient,
                   color: 'white',
                   border: 'none',
-                  opacity: (processingId || (modalAction === 'rejected' && !comments.trim())) ? 0.5 : 1,
-                  cursor: (processingId || (modalAction === 'rejected' && !comments.trim())) ? 'not-allowed' : 'pointer'
+                  opacity: (processingId || missingRequired) ? 0.5 : 1,
+                  cursor: (processingId || missingRequired) ? 'not-allowed' : 'pointer'
                 }}
               >
                 {processingId ? (
@@ -511,8 +646,8 @@ export const Approvals = () => {
                   </>
                 ) : (
                   <>
-                    <span className="btn-icon">{modalAction === 'approved' ? '✓' : '✕'}</span>
-                    {modalAction === 'approved' ? 'Confirm Approval' : 'Confirm Rejection'}
+                    <span className="btn-icon">{theme.icon}</span>
+                    {modalAction === 'approved' ? 'Confirm Approval' : modalAction === 'recalled' ? 'Confirm Recall' : 'Confirm Rejection'}
                   </>
                 )}
               </button>
@@ -521,7 +656,7 @@ export const Approvals = () => {
         </div>
       </div>
     );
-  }, [showApprovalModal, selectedRequest, modalAction, processingId, comments, handleCommentsChange]);
+  }, [showApprovalModal, selectedRequest, modalAction, processingId, comments, handleCommentsChange, recallEffectiveDate]);
 
   if (loading) {
     return (
@@ -604,6 +739,21 @@ export const Approvals = () => {
             </div>
           </div>
 
+          {stats.hodApproved > 0 && (
+            <div className="stats-card admin-stats-card">
+              <div className="stats-content">
+                <div className="stats-icon stats-icon-primary">✓</div>
+                <div className="stats-details">
+                  <h3 className="stats-title">HOD Approved</h3>
+                  <p className="stats-value">{stats.hodApproved}</p>
+                  <p className="stats-change">
+                    <span className="stats-change-neutral">Awaiting HR final approval</span>
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
+
           <div className="stats-card admin-stats-card">
             <div className="stats-content">
               <div className="stats-icon stats-icon-danger">❌</div>
@@ -656,9 +806,11 @@ export const Approvals = () => {
                     <tr>
                       <th>Employee</th>
                       <th>Leave Type</th>
+                      <th>Cover Person</th>
                       <th>Start Date</th>
                       <th>End Date</th>
                       <th>Days</th>
+                      <th>Stage</th>
                       <th>Submitted</th>
                       <th>Actions</th>
                     </tr>
@@ -691,10 +843,28 @@ export const Approvals = () => {
                             )}
                           </div>
                         </td>
+                        <td style={{ fontSize: 13, color: '#374151' }}>
+                          {request.cover_person || <span style={{ color: '#9ca3af' }}>—</span>}
+                        </td>
                         <td>{new Date(request.start_date).toLocaleDateString()}</td>
                         <td>{new Date(request.end_date).toLocaleDateString()}</td>
                         <td>
                           <span className="font-semibold">{request.total_days}</span>
+                        </td>
+                        <td>
+                          {request.status === 'hod_approved' ? (
+                            <span style={{
+                              display: 'inline-block', padding: '2px 10px', borderRadius: 10,
+                              background: '#dbeafe', color: '#1d4ed8',
+                              fontSize: 11, fontWeight: 700,
+                            }}>HOD Approved</span>
+                          ) : (
+                            <span style={{
+                              display: 'inline-block', padding: '2px 10px', borderRadius: 10,
+                              background: '#fef9c3', color: '#92400e',
+                              fontSize: 11, fontWeight: 700,
+                            }}>Pending HOD</span>
+                          )}
                         </td>
                         <td className="text-gray-600 text-sm">
                           <div>
@@ -753,6 +923,112 @@ export const Approvals = () => {
             )}
           </div>
         </div>
+
+        {/* Approved Leave — Recall */}
+        {isHRorAdmin && (
+          <div className="card admin-card" style={{ marginTop: '2rem' }}>
+            <div className="card-header">
+              <h2 className="card-title">Approved Leave (On Leave / Upcoming)</h2>
+              <p className="card-subtitle">
+                {filteredApprovedRequests.length} of {approvedRequests.length} {approvedRequests.length === 1 ? 'staff member' : 'staff members'} currently on or about to start approved leave
+              </p>
+            </div>
+
+            {approvedRequests.length > 0 && (
+              <div style={{ padding: '1rem 1.5rem 0' }}>
+                <input
+                  type="text"
+                  className="form-input enhanced-input"
+                  placeholder="Search by employee name, ID, department, or leave type..."
+                  value={recallSearchTerm}
+                  onChange={(e) => setRecallSearchTerm(e.target.value)}
+                  style={{ maxWidth: '420px' }}
+                />
+              </div>
+            )}
+
+            <div className="card-content">
+              {approvedRequests.length === 0 ? (
+                <div className="empty-state">
+                  <div className="empty-state-icon">🏖️</div>
+                  <h3 className="empty-state-title">No approved leave right now</h3>
+                  <p className="empty-state-description">
+                    There is no currently-approved leave to recall.
+                  </p>
+                </div>
+              ) : filteredApprovedRequests.length === 0 ? (
+                <div className="empty-state">
+                  <div className="empty-state-icon">🔍</div>
+                  <h3 className="empty-state-title">No matches</h3>
+                  <p className="empty-state-description">
+                    No approved leave matches "{recallSearchTerm}".
+                  </p>
+                </div>
+              ) : (
+                <div className="data-table">
+                  <table className="table">
+                    <thead>
+                      <tr>
+                        <th>Employee</th>
+                        <th>Leave Type</th>
+                        <th>Start Date</th>
+                        <th>End Date</th>
+                        <th>Days</th>
+                        <th>Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filteredApprovedRequests.map((request) => (
+                        <tr key={request.id}>
+                          <td>
+                            <div className="employee-cell">
+                              <div className="employee-avatar">
+                                {request.users_profile?.first_name?.charAt(0) || 'U'}
+                              </div>
+                              <div>
+                                <div className="employee-name">
+                                  {request.users_profile?.first_name} {request.users_profile?.last_name}
+                                </div>
+                                <div className="employee-id">{formatEmployeeId(request.users_profile?.employee_id)}</div>
+                              </div>
+                            </div>
+                          </td>
+                          <td>
+                            <span className="badge badge-primary">
+                              {request.leave_types?.name}
+                            </span>
+                          </td>
+                          <td>{new Date(request.start_date).toLocaleDateString()}</td>
+                          <td>{new Date(request.end_date).toLocaleDateString()}</td>
+                          <td>
+                            <span className="font-semibold">{request.total_days}</span>
+                          </td>
+                          <td>
+                            <button
+                              onClick={() => openApprovalModal(request, 'recalled')}
+                              disabled={processingId === request.id}
+                              className="btn btn-sm btn-warning"
+                              title="Recall this staff member back to work"
+                              style={{
+                                padding: '0.5rem 1rem',
+                                fontSize: '0.875rem',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '0.25rem'
+                              }}
+                            >
+                              ↩ Recall
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
       </div>
 
       {approvalModalContent}

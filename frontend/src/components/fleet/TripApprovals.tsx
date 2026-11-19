@@ -3,6 +3,7 @@
 
 import { useState, useEffect } from 'react';
 import { AdminSidebar } from '../admin/AdminSidebar';
+import NotificationBell from '../notifications/NotificationBell';
 import { 
   getPendingDepartmentApprovals, 
   approveTripRequest, 
@@ -103,18 +104,18 @@ export function TripApprovals() {
     }
   };
 
-  const canApprove = profile?.role === 'hod' || profile?.role === 'fleet_manager' || profile?.role === 'super_admin';
+  const canApprove = profile?.role === 'hod' || profile?.role === 'fleet_manager' || profile?.role === 'super_admin' || profile?.role === 'hr_admin';
 
   if (!canApprove) {
     return (
       <div className="admin-layout">
         <AdminSidebar />
-        <main className="admin-main">
+        <div className="admin-main">
           <div className="unauthorized">
             <h2>Access Denied</h2>
             <p>You don't have permission to approve trip requests.</p>
           </div>
-        </main>
+        </div>
       </div>
     );
   }
@@ -122,16 +123,20 @@ export function TripApprovals() {
   return (
     <div className="admin-layout">
       <AdminSidebar />
-      <main className="admin-main">
-        <div className="admin-container">
-          <header className="admin-header">
-            <h1>Trip Request Approvals</h1>
-            <p className="admin-subtitle">
+      <div className="admin-main">
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1.5rem' }}>
+          <h1 className="page-title">Trip Request Approvals</h1>
+          <NotificationBell />
+        </div>
+        <div className="page-header">
+          <div className="header-content">
+            <p className="page-subtitle">
               {profile?.role === 'hod' 
                 ? 'Review and approve trip requests from your department'
                 : 'Review and approve all pending trip requests'}
             </p>
-          </header>
+          </div>
+        </div>
 
           {error && (
             <div className="alert alert-error mb-4">
@@ -177,28 +182,43 @@ export function TripApprovals() {
                     </div>
 
                     <div className="route-info">
-                      <div className="route-point">
-                        <span className="point-icon">📍</span>
-                        <span className="point-value">{request.destination}</span>
-                      </div>
-                      <div className="route-arrow">↓</div>
-                      <div className="route-point">
-                        <span className="point-icon">🎯</span>
-                        <span className="point-value">{request.destination}</span>
-                      </div>
+                      {(() => {
+                        const fromMatch = request.destination?.match(/From:\s*(.+?)\s*\|/i);
+                        const toMatch = request.destination?.match(/To:\s*(.+)$/i);
+                        const from = fromMatch?.[1]?.trim();
+                        const to = toMatch?.[1]?.trim() ?? request.destination;
+                        return from ? (
+                          <>
+                            <div className="route-point">
+                              <span className="point-icon">📍</span>
+                              <span className="point-value">{from}</span>
+                            </div>
+                            <div className="route-arrow">↓</div>
+                            <div className="route-point">
+                              <span className="point-icon">🎯</span>
+                              <span className="point-value">{to}</span>
+                            </div>
+                          </>
+                        ) : (
+                          <div className="route-point">
+                            <span className="point-icon">🎯</span>
+                            <span className="point-value">{to}</span>
+                          </div>
+                        );
+                      })()}
                     </div>
 
                     <div className="trip-details">
                       <div className="detail-item">
                         <span className="detail-icon">📅</span>
-                        <span>{new Date(request.start_datetime).toLocaleDateString()}</span>
+                        <span>{new Date(request.start_datetime).toLocaleDateString('en-GB', { timeZone: 'Africa/Nairobi', day: '2-digit', month: 'short', year: 'numeric' })}</span>
                       </div>
                       <div className="detail-item">
                         <span className="detail-icon">⏰</span>
                         <span>
-                          {new Date(request.start_datetime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                          {new Date(request.start_datetime).toLocaleTimeString('en-GB', { timeZone: 'Africa/Nairobi', hour: '2-digit', minute: '2-digit' })}
                           {' - '}
-                          {new Date(request.end_datetime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                          {new Date(request.end_datetime).toLocaleTimeString('en-GB', { timeZone: 'Africa/Nairobi', hour: '2-digit', minute: '2-digit' })}
                         </span>
                       </div>
                       <div className="detail-item">
@@ -233,7 +253,7 @@ export function TripApprovals() {
 
                   <div className="approval-footer">
                     <span className="submitted-date">
-                      Submitted: {new Date(request.created_at).toLocaleString()}
+                      Submitted: {new Date(request.created_at).toLocaleString('en-GB', { timeZone: 'Africa/Nairobi', day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
                     </span>
                     <div className="approval-actions">
                       <button
@@ -276,9 +296,9 @@ export function TripApprovals() {
                     Please provide a reason for the rejection.
                   </p>
                   <div className="form-group">
-                    <label className="required">Reason for Rejection</label>
+                    <label className="form-label required">Reason for Rejection</label>
                     <textarea
-                      className="form-control"
+                      className="form-input"
                       value={rejectionReason}
                       onChange={(e) => setRejectionReason(e.target.value)}
                       placeholder="Please explain why this request is being rejected..."
@@ -304,8 +324,7 @@ export function TripApprovals() {
               </div>
             </div>
           )}
-        </div>
-      </main>
+      </div>
     </div>
   );
 }

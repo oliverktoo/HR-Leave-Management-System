@@ -32,6 +32,7 @@ const DEFAULT_OFFICE_CONFIG: GeofenceConfig = {
 let cachedConfigs: GeofenceConfig[] = [];
 let lastFetchTime = 0;
 const CACHE_DURATION = 5 * 60 * 1000; // 5 minutes
+const STORAGE_KEY = 'geofence_office_locations_cache';
 
 /**
  * Load all active geofence configurations from database
@@ -75,7 +76,12 @@ export async function loadAllGeofenceConfigs(): Promise<GeofenceConfig[]> {
 
       cachedConfigs = configs;
       lastFetchTime = Date.now();
-      
+
+      // Persist to localStorage so geofence checks work when device is briefly offline
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(configs));
+      } catch { /* storage unavailable — non-fatal */ }
+
       console.log(`✅ Loaded ${configs.length} office location(s) from database`);
       return configs;
     }
@@ -114,6 +120,21 @@ export async function loadAllGeofenceConfigs(): Promise<GeofenceConfig[]> {
     
   } catch (error) {
     console.error('Error loading office locations:', error);
+
+    // Network failure — try localStorage cache before falling back to default
+    try {
+      const stored = localStorage.getItem(STORAGE_KEY);
+      if (stored) {
+        const parsed = JSON.parse(stored) as GeofenceConfig[];
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          console.warn('⚠️ Using offline localStorage office locations cache');
+          cachedConfigs = parsed;
+          lastFetchTime = Date.now();
+          return cachedConfigs;
+        }
+      }
+    } catch { /* parse error — fall through */ }
+
     console.warn('Using default geofence config');
     cachedConfigs = [DEFAULT_OFFICE_CONFIG];
     lastFetchTime = Date.now();
@@ -127,6 +148,7 @@ export async function loadAllGeofenceConfigs(): Promise<GeofenceConfig[]> {
 export function clearGeofenceCache(): void {
   cachedConfigs = [];
   lastFetchTime = 0;
+  try { localStorage.removeItem(STORAGE_KEY); } catch { /* non-fatal */ }
 }
 
 // For backwards compatibility - get primary office location

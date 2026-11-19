@@ -3,6 +3,7 @@
 
 import { useState, useEffect } from 'react';
 import { AdminSidebar } from '../admin/AdminSidebar';
+import NotificationBell from '../notifications/NotificationBell';
 import {
   getFuelRecords,
   createFuelRecord,
@@ -153,17 +154,19 @@ export function FuelManagement() {
   return (
     <div className="admin-layout">
       <AdminSidebar />
-      <main className="admin-main">
-        <div className="admin-container">
-          <header className="admin-header">
-            <div>
-              <h1>⛽ Fuel Management</h1>
-              <p className="admin-subtitle">Track and verify fuel purchases</p>
-            </div>
-            <button className="btn btn-primary" onClick={() => setShowForm(true)}>
-              + Record Fuel
-            </button>
-          </header>
+      <div className="admin-main">
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1.5rem' }}>
+          <h1 className="page-title">⛽ Fuel Management</h1>
+          <NotificationBell />
+        </div>
+        <div className="page-header">
+          <div className="header-content">
+            <p className="page-subtitle">Track and verify fuel purchases</p>
+          </div>
+          <button className="btn btn-primary" onClick={() => setShowForm(true)}>
+            + Record Fuel
+          </button>
+        </div>
 
           {error && (
             <div className="alert alert-error mb-4">
@@ -218,8 +221,8 @@ export function FuelManagement() {
                 </div>
                 <div className="modal-body">
                   <div className="form-group">
-                    <label className="required">Vehicle</label>
-                    <select className="form-control" value={vehicleId} onChange={(e) => setVehicleId(e.target.value)}>
+                    <label className="form-label required">Vehicle</label>
+                    <select className="form-select" value={vehicleId} onChange={(e) => setVehicleId(e.target.value)}>
                       <option value="">Select Vehicle</option>
                       {vehicles.map(v => (
                         <option key={v.id} value={v.id}>
@@ -230,50 +233,50 @@ export function FuelManagement() {
                   </div>
                   <div className="form-row">
                     <div className="form-group">
-                      <label className="required">Quantity (Liters)</label>
+                      <label className="form-label required">Quantity (Liters)</label>
                       <input
                         type="number"
                         step="0.01"
-                        className="form-control"
+                        className="form-input"
                         value={quantity}
                         onChange={(e) => setQuantity(e.target.value)}
                       />
                     </div>
                     <div className="form-group">
-                      <label className="required">Total Cost</label>
+                      <label className="form-label required">Total Cost</label>
                       <input
                         type="number"
                         step="0.01"
-                        className="form-control"
+                        className="form-input"
                         value={cost}
                         onChange={(e) => setCost(e.target.value)}
                       />
                     </div>
                   </div>
                   <div className="form-group">
-                    <label className="required">Odometer Reading (km)</label>
+                    <label className="form-label required">Odometer Reading (km)</label>
                     <input
                       type="number"
                       step="0.1"
-                      className="form-control"
+                      className="form-input"
                       value={odometer}
                       onChange={(e) => setOdometer(e.target.value)}
                     />
                   </div>
                   <div className="form-group">
-                    <label>Fuel Station</label>
+                    <label className="form-label">Fuel Station</label>
                     <input
                       type="text"
-                      className="form-control"
+                      className="form-input"
                       value={station}
                       onChange={(e) => setStation(e.target.value)}
                       placeholder="e.g., Shell Highway Station"
                     />
                   </div>
                   <div className="form-group">
-                    <label>Notes</label>
+                    <label className="form-label">Notes</label>
                     <textarea
-                      className="form-control"
+                      className="form-input"
                       value={notes}
                       onChange={(e) => setNotes(e.target.value)}
                       rows={3}
@@ -292,13 +295,13 @@ export function FuelManagement() {
 
           {/* Filters */}
           <div className="filters-bar mb-4">
-            <select className="form-control" value={filterVehicle} onChange={(e) => setFilterVehicle(e.target.value)}>
+            <select className="form-select" value={filterVehicle} onChange={(e) => setFilterVehicle(e.target.value)}>
               <option value="">All Vehicles</option>
               {vehicles.map(v => (
                 <option key={v.id} value={v.id}>{v.plate_number}</option>
               ))}
             </select>
-            <select className="form-control" value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)}>
+            <select className="form-select" value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)}>
               <option value="">All Status</option>
               <option value="pending">Pending</option>
               <option value="verified">Verified</option>
@@ -331,7 +334,7 @@ export function FuelManagement() {
                 <tbody>
                   {fuelRecords.map((record) => (
                     <tr key={record.id}>
-                      <td>{new Date(record.refuel_datetime).toLocaleDateString()}</td>
+                      <td>{new Date(record.refuel_datetime).toLocaleString('en-GB', { timeZone: 'Africa/Nairobi', day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}</td>
                       <td>{record.vehicle?.plate_number}</td>
                       <td>{record.station_name || 'N/A'}</td>
                       <td>{record.quantity_liters.toFixed(2)} L</td>
@@ -376,8 +379,7 @@ export function FuelManagement() {
               </table>
             )}
           </div>
-        </div>
-      </main>
+      </div>
     </div>
   );
 }

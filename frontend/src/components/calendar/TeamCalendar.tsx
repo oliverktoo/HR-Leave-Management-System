@@ -207,13 +207,13 @@ export const TeamCalendar = () => {
                     <div
                       key={leave.id}
                       className="leave-list-item"
-                      style={{ borderLeftColor: leave.leave_types?.color_code }}
+                      style={{ borderLeftColor: leave.leave_types?.color }}
                     >
                       <div className="leave-list-item-header">
                         <div className="leave-list-item-type">
                           <div
                             className="leave-list-type-indicator"
-                            style={{ backgroundColor: leave.leave_types?.color_code }}
+                            style={{ backgroundColor: leave.leave_types?.color }}
                           ></div>
                           <span className="leave-list-type-name">{leave.leave_types?.name}</span>
                         </div>

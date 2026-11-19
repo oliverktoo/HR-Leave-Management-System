@@ -1,8 +1,8 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 
 // Try to get from environment, fallback to hardcoded values
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string || 'https://nmvdagfduojwbsxgqkjw.supabase.co';
-const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5tdmRhZ2ZkdW9qd2JzeGdxa2p3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjMxNzUxNzMsImV4cCI6MjA3ODc1MTE3M30.kfHFaNYGzSEVl7TgTdIj43Iw67hUZu7LwESX77vxJWA';
+export const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string || 'https://nmvdagfduojwbsxgqkjw.supabase.co';
+export const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5tdmRhZ2ZkdW9qd2JzeGdxa2p3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjMxNzUxNzMsImV4cCI6MjA3ODc1MTE3M30.kfHFaNYGzSEVl7TgTdIj43Iw67hUZu7LwESX77vxJWA';
 
 if (!supabaseUrl || !supabaseAnonKey) {
   throw new Error('Missing Supabase environment variables. Please check your .env file.');

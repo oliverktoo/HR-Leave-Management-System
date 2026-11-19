@@ -23,8 +23,9 @@ import {
   CreateTripExpenseInput,
 } from '../../types/fleetPhase2';
 import { useAuth } from '../../hooks/useAuth';
+import { RouteMap } from './RouteMap';
 
-type TabType = 'overview' | 'logs' | 'fuel' | 'expenses';
+type TabType = 'overview' | 'logs' | 'fuel' | 'expenses' | 'route';
 
 export function TripDetails() {
   const navigate = useNavigate();
@@ -306,6 +307,14 @@ export function TripDetails() {
             >
               💰 Expenses ({expenses.length})
             </button>
+            {(trip.status === 'completed' || trip.status === 'in_progress') && (
+              <button
+                className={`tab ${activeTab === 'route' ? 'active' : ''}`}
+                onClick={() => setActiveTab('route')}
+              >
+                🗺️ Route Map
+              </button>
+            )}
           </div>
 
           {/* Overview Tab */}
@@ -328,11 +337,11 @@ export function TripDetails() {
                 </div>
                 <div className="detail-item">
                   <strong>Departure:</strong>
-                  <span>{new Date(trip.start_datetime).toLocaleString()}</span>
+                  <span>{new Date(trip.start_datetime).toLocaleString('en-GB', { timeZone: 'Africa/Nairobi', day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}</span>
                 </div>
                 <div className="detail-item">
                   <strong>Return:</strong>
-                  <span>{new Date(trip.end_datetime).toLocaleString()}</span>
+                  <span>{new Date(trip.end_datetime).toLocaleString('en-GB', { timeZone: 'Africa/Nairobi', day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}</span>
                 </div>
                 <div className="detail-item">
                   <strong>Passengers:</strong>
@@ -444,7 +453,7 @@ export function TripDetails() {
                         <div className="log-content">
                           <div className="log-header">
                             <span className="log-type">{log.log_type}</span>
-                            <span className="log-time">{new Date(log.log_datetime).toLocaleString()}</span>
+                            <span className="log-time">{new Date(log.log_datetime).toLocaleString('en-GB', { timeZone: 'Africa/Nairobi', day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}</span>
                           </div>
                           <p>{log.description}</p>
                           <div className="log-meta">
@@ -554,7 +563,7 @@ export function TripDetails() {
                     <tbody>
                       {fuelRecords.map((fuel) => (
                         <tr key={fuel.id}>
-                          <td>{new Date(fuel.refuel_datetime).toLocaleString()}</td>
+                          <td>{new Date(fuel.refuel_datetime).toLocaleString('en-GB', { timeZone: 'Africa/Nairobi', day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}</td>
                           <td>{fuel.station_name || 'N/A'}</td>
                           <td>{fuel.quantity_liters.toFixed(2)} L</td>
                           <td>${fuel.cost_amount.toFixed(2)}</td>
@@ -657,7 +666,7 @@ export function TripDetails() {
                       <tbody>
                         {expenses.map((expense) => (
                           <tr key={expense.id}>
-                            <td>{new Date(expense.expense_date).toLocaleDateString()}</td>
+                            <td>{new Date(expense.expense_date).toLocaleDateString('en-GB', { timeZone: 'Africa/Nairobi', day: '2-digit', month: 'short', year: 'numeric' })}</td>
                             <td>{expense.expense_type}</td>
                             <td>{expense.description}</td>
                             <td>{expense.location || 'N/A'}</td>
@@ -678,6 +687,17 @@ export function TripDetails() {
                 )}
               </div>
             </div>
+          )}
+          {/* Route Map Tab */}
+          {activeTab === 'route' && (
+            <RouteMap
+              tripId={trip.id}
+              odometerDistance={
+                trip.start_odometer && trip.end_odometer
+                  ? trip.end_odometer - trip.start_odometer
+                  : undefined
+              }
+            />
           )}
         </div>
       </main>

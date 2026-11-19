@@ -181,6 +181,8 @@ export interface TripRequest {
   actual_distance_km?: number;
   trip_rating?: number;
   trip_feedback?: string;
+  started_by?: string;
+  completed_by?: string;
   
   // Metadata
   created_at: string;
@@ -246,7 +248,7 @@ export interface RejectTripRequestInput {
 export interface AssignTripRequestInput {
   id: string;
   assigned_vehicle_id: string;
-  assigned_driver_id: string;
+  assigned_driver_id?: string;
 }
 
 // ==================

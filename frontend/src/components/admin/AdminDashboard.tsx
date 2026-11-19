@@ -295,7 +295,8 @@ const AdminDashboard = () => {
       approved: '✅',
       rejected: '❌',
       cancelled: '🚫',
-      hod_approved: '✅'
+      hod_approved: '✅',
+      recalled: '↩️'
     };
     return icons[status] || '📄';
   };
@@ -500,8 +501,8 @@ const AdminDashboard = () => {
                         </span>
                         <span className="activity-type">{activity.leave_types.name}</span>
                         <span className="activity-details">
-                          from {new Date(activity.start_date).toLocaleDateString()} 
-                          to {new Date(activity.end_date).toLocaleDateString()}
+                          from {new Date(activity.start_date).toLocaleDateString('en-GB', { timeZone: 'Africa/Nairobi', day: '2-digit', month: 'short', year: 'numeric' })}
+                          to {new Date(activity.end_date).toLocaleDateString('en-GB', { timeZone: 'Africa/Nairobi', day: '2-digit', month: 'short', year: 'numeric' })}
                         </span>
                       </div>
                       <div className="activity-time">

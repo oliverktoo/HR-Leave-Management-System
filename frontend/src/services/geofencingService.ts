@@ -9,24 +9,12 @@
 
 import { LocalNotifications } from '@capacitor/local-notifications';
 import { Capacitor } from '@capacitor/core';
-import { OFFICE_GEOFENCE, GeofenceConfig, getOfficeLocations } from '../config/geofenceConfig';
+import { OFFICE_GEOFENCE, GeofenceConfig, getOfficeLocations, loadMinGPSAccuracy } from '../config/geofenceConfig';
 import { locationService } from './locationService';
 import { supabase } from '../lib/supabaseClient';
 import { checkOut } from './attendanceService';
 
-// Background Geolocation Plugin
-// Note: @capacitor-community/background-geolocation is a community plugin
-// For production use, consider: @transistorsoft/capacitor-background-geolocation (commercial)
-let BackgroundGeolocation: any = null;
 
-if (Capacitor.isNativePlatform()) {
-  try {
-    // Dynamically import the plugin if available
-    BackgroundGeolocation = (window as any).BackgroundGeolocation;
-  } catch (error) {
-    console.warn('⚠️ Background Geolocation plugin not available:', error);
-  }
-}
 
 export interface GeofenceEvent {
   identifier: string;
@@ -81,62 +69,22 @@ class GeofencingService {
   }
 
   /**
-   * Start monitoring geofences
+   * Start monitoring geofences.
+   * NOTE: Background geolocation is not yet implemented — this is a no-op.
+   * On-demand geofence checking is available via checkIfAtOffice().
+   * To enable background geofencing, integrate a native plugin such as
+   * @transistorsoft/capacitor-background-geolocation and wire handleGeofenceExit().
    */
   async startMonitoring(): Promise<void> {
-    if (this.isMonitoring) {
-      console.log('⚠️ Already monitoring geofences');
-      return;
-    }
-
     if (!Capacitor.isNativePlatform()) {
-      console.warn('⚠️ Geofencing only available on native platforms');
       return;
     }
-
-    try {
-      // Load office locations from database
-      const officeLocations = await getOfficeLocations();
-      
-      // Add geofences for all office locations
-      for (const office of officeLocations) {
-        await this.addGeofence(office);
-      }
-
-      this.isMonitoring = true;
-      console.log('✅ Started monitoring geofences');
-    } catch (error) {
-      console.error('❌ Error starting geofence monitoring:', error);
-      throw error;
-    }
+    console.log('ℹ️ Background geofence monitoring not yet implemented. Using on-demand checks via checkIfAtOffice().');
   }
 
   /**
-   * Add a geofence
-   */
-  private async addGeofence(config: GeofenceConfig): Promise<void> {
-    if (!BackgroundGeolocation) {
-      console.warn('⚠️ Background Geolocation plugin not available');
-      return;
-    }
-
-    try {
-      // Note: Background geolocation implementation varies by plugin
-      // This is a conceptual implementation - adjust based on actual plugin API
-      console.log(`📍 Adding geofence: ${config.identifier}`);
-      console.log(`   Location: ${config.latitude}, ${config.longitude}`);
-      console.log(`   Radius: ${config.radius}m`);
-      
-      // Store geofence config for manual checking
-      // (Background geolocation may need platform-specific implementation)
-    } catch (error) {
-      console.error('❌ Error adding geofence:', error);
-      throw error;
-    }
-  }
-
-  /**
-   * Check if currently within office geofence
+   * Check if currently within office geofence.
+   * Gets GPS location once, validates accuracy, then checks all office locations.
    */
   async checkIfAtOffice(): Promise<{
     isAtOffice: boolean;
@@ -145,38 +93,50 @@ class GeofencingService {
     error?: string;
   }> {
     try {
-      // Load office locations from database
-      const officeLocations = await getOfficeLocations();
-      
-      // Check each office location
-      for (const office of officeLocations) {
-        const result = await locationService.isWithinRadius(
-          office.latitude,
-          office.longitude,
-          office.radius
-        );
+      // Get GPS location once (avoids multiple requests when looping offices)
+      const locationResult = await locationService.getCurrentLocation();
+      if (!locationResult.success || !locationResult.coordinates) {
+        return {
+          isAtOffice: false,
+          distance: 0,
+          error: locationResult.error || 'Could not get GPS location'
+        };
+      }
 
-        if (result.withinRadius) {
-          return {
-            isAtOffice: true,
-            distance: result.distance,
-            office: office
-          };
+      const { latitude, longitude, accuracy } = locationResult.coordinates;
+
+      // Validate GPS accuracy before trusting the location
+      const minAccuracy = await loadMinGPSAccuracy();
+      if (accuracy > minAccuracy) {
+        return {
+          isAtOffice: false,
+          distance: 0,
+          error: `GPS accuracy too low (±${Math.round(accuracy)}m). Move to an open area for a better signal.`
+        };
+      }
+
+      // Load all active office locations and check each one
+      const officeLocations = await getOfficeLocations();
+      let nearestDist = Infinity;
+      let nearestOffice = officeLocations[0] || OFFICE_GEOFENCE;
+
+      for (const office of officeLocations) {
+        const dist = locationService.calculateDistance(latitude, longitude, office.latitude, office.longitude);
+
+        if (dist <= office.radius) {
+          return { isAtOffice: true, distance: Math.round(dist), office };
+        }
+
+        if (dist < nearestDist) {
+          nearestDist = dist;
+          nearestOffice = office;
         }
       }
 
-      // Not at any office - get distance to primary office
-      const primaryOffice = officeLocations[0] || OFFICE_GEOFENCE;
-      const primaryOfficeCheck = await locationService.isWithinRadius(
-        primaryOffice.latitude,
-        primaryOffice.longitude,
-        primaryOffice.radius
-      );
-
       return {
         isAtOffice: false,
-        distance: primaryOfficeCheck.distance,
-        office: primaryOffice
+        distance: Math.round(nearestDist === Infinity ? 0 : nearestDist),
+        office: nearestOffice
       };
     } catch (error) {
       console.error('❌ Error checking office location:', error);
@@ -254,7 +214,7 @@ class GeofencingService {
         return;
       }
 
-      const today = new Date().toISOString().split('T')[0];
+      const today = new Date().toLocaleDateString('en-CA', { timeZone: 'Africa/Nairobi' });
       const { data: todayRecord } = await supabase
         .from('attendance_records')
         .select('check_in_time, check_out_time')
@@ -318,20 +278,10 @@ class GeofencingService {
   }
 
   /**
-   * Stop monitoring geofences
+   * Stop monitoring geofences (no-op until background geolocation is implemented).
    */
   async stopMonitoring(): Promise<void> {
-    if (!this.isMonitoring) {
-      return;
-    }
-
-    try {
-      // Remove all geofences
-      this.isMonitoring = false;
-      console.log('⏹️ Stopped monitoring geofences');
-    } catch (error) {
-      console.error('❌ Error stopping geofence monitoring:', error);
-    }
+    this.isMonitoring = false;
   }
 
   /**

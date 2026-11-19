@@ -215,13 +215,14 @@ export async function checkVehicleAvailability(
 
 /**
  * Get available vehicles for a date range
+ * Uses a single overlap query instead of N+1 RPC calls.
  */
 export async function getAvailableVehicles(
   startDatetime: string,
   endDatetime: string,
   minSeats?: number
 ): Promise<FleetVehicle[]> {
-  // Get all available vehicles
+  // 1. All non-retired vehicles (fleet manager may want to see all statuses that could work)
   let query = supabase
     .from('fleet_vehicles')
     .select(`
@@ -230,33 +231,26 @@ export async function getAvailableVehicles(
     `)
     .eq('status', 'available');
 
-  if (minSeats) {
+  if (minSeats && minSeats > 1) {
     query = query.gte('seating_capacity', minSeats);
   }
 
   const { data: vehicles, error } = await query;
+  if (error) throw error;
+  if (!vehicles || vehicles.length === 0) return [];
 
-  if (error) {
-    console.error('Error fetching available vehicles:', error);
-    throw error;
-  }
+  // 2. Find vehicles that have a conflicting booking (overlap) in a single query
+  const { data: conflicting } = await supabase
+    .from('trip_requests')
+    .select('assigned_vehicle_id')
+    .in('status', ['approved', 'assigned', 'in_progress'])
+    .lte('start_datetime', endDatetime)
+    .gte('end_datetime', startDatetime)
+    .not('assigned_vehicle_id', 'is', null);
 
-  // Filter out vehicles with conflicting bookings
-  const availableVehicles: FleetVehicle[] = [];
-  
-  for (const vehicle of vehicles || []) {
-    const availability = await checkVehicleAvailability(
-      vehicle.id,
-      startDatetime,
-      endDatetime
-    );
-    
-    if (availability.is_available) {
-      availableVehicles.push(vehicle);
-    }
-  }
+  const busyIds = new Set((conflicting || []).map((r: any) => r.assigned_vehicle_id));
 
-  return availableVehicles;
+  return vehicles.filter(v => !busyIds.has(v.id));
 }
 
 // ==========================================
@@ -280,7 +274,7 @@ export async function getDrivers(filters?: DriverFilters): Promise<DriverProfile
   if (filters?.license_expiring_within_days) {
     const futureDate = new Date();
     futureDate.setDate(futureDate.getDate() + filters.license_expiring_within_days);
-    query = query.lte('license_expiry', futureDate.toISOString().split('T')[0]);
+    query = query.lte('license_expiry', futureDate.toLocaleDateString('en-CA', { timeZone: 'Africa/Nairobi' }));
   }
 
   const { data, error } = await query;
@@ -521,56 +515,52 @@ export async function checkDriverAvailability(
 
 /**
  * Get available drivers for a date range
+ * Uses batch overlap queries instead of N+1 RPC calls.
  */
 export async function getAvailableDrivers(
   startDatetime: string,
   endDatetime: string
 ): Promise<DriverProfile[]> {
-  // Get all active drivers with valid licenses
+  // 1. All active drivers (remove license_expiry filter from query — show all, flag expired in UI)
   const { data: drivers, error } = await supabase
     .from('driver_profiles')
     .select('*')
-    .eq('is_active', true)
-    .gte('license_expiry', new Date().toISOString().split('T')[0]);
+    .eq('is_active', true);
 
-  if (error) {
-    console.error('Error fetching available drivers:', error);
-    throw error;
-  }
-
+  if (error) throw error;
   if (!drivers || drivers.length === 0) return [];
 
-  // Get user profiles for all drivers
-  const userIds = drivers.map(d => d.user_id);
+  // 2. Find drivers on a conflicting trip in a single query
+  const { data: busyTrips } = await supabase
+    .from('trip_requests')
+    .select('assigned_driver_id')
+    .in('status', ['assigned', 'in_progress'])
+    .lte('start_datetime', endDatetime)
+    .gte('end_datetime', startDatetime)
+    .not('assigned_driver_id', 'is', null);
+
+  const busyDriverIds = new Set((busyTrips || []).map((r: any) => r.assigned_driver_id));
+
+  // 3. Filter out busy drivers
+  const availableDrivers = drivers.filter(d => !busyDriverIds.has(d.user_id));
+
+  if (availableDrivers.length === 0) return [];
+
+  // 4. Fetch user profiles in one batch
+  const userIds = availableDrivers.map(d => d.user_id);
   const { data: profiles } = await supabase
     .from('users_profile')
     .select('id, first_name, last_name, phone, department_id, photo_url')
     .in('id', userIds);
 
-  const transformedProfiles = (profiles || []).map((p: any) => ({
-    ...p,
-    full_name: `${p.first_name} ${p.last_name}`
+  const profileMap = new Map(
+    (profiles || []).map((p: any) => [p.id, { ...p, full_name: `${p.first_name} ${p.last_name}` }])
+  );
+
+  return availableDrivers.map(driver => ({
+    ...driver,
+    user_profile: profileMap.get(driver.user_id) || null,
   }));
-
-  // Filter out drivers with conflicting assignments or on leave
-  const availableDrivers: DriverProfile[] = [];
-  
-  for (const driver of drivers) {
-    const availability = await checkDriverAvailability(
-      driver.user_id,
-      startDatetime,
-      endDatetime
-    );
-    
-    if (availability.is_available) {
-      availableDrivers.push({
-        ...driver,
-        user_profile: transformedProfiles?.find(p => p.id === driver.user_id) || null,
-      });
-    }
-  }
-
-  return availableDrivers;
 }
 
 // ==========================================
@@ -585,7 +575,7 @@ export async function getTripRequests(filters?: TripRequestFilters): Promise<Tri
     .from('trip_requests')
     .select(`
       *,
-      department:departments!department_id(id, name)
+      department:departments!left(id, name)
     `)
     .order('created_at', { ascending: false });
 
@@ -628,7 +618,25 @@ export async function getTripRequests(filters?: TripRequestFilters): Promise<Tri
     throw error;
   }
 
-  return data || [];
+  if (!data || data.length === 0) return [];
+
+  // Batch-fetch requester profiles for the list
+  const requesterIds = [...new Set((data as any[]).map((r: any) => r.requester_id).filter(Boolean))];
+  let profileMap: Record<string, any> = {};
+  if (requesterIds.length > 0) {
+    const { data: profiles } = await supabase
+      .from('users_profile')
+      .select('id, first_name, last_name')
+      .in('id', requesterIds);
+    for (const p of (profiles || [])) {
+      profileMap[p.id] = { ...p, full_name: `${p.first_name} ${p.last_name}` };
+    }
+  }
+
+  return (data as any[]).map((r: any) => ({
+    ...r,
+    requester_profile: profileMap[r.requester_id] || null,
+  }));
 }
 
 /**
@@ -639,7 +647,7 @@ export async function getTripRequestById(id: string): Promise<TripRequest | null
     .from('trip_requests')
     .select(`
       *,
-      department:departments!department_id(id, name)
+      department:departments!left(id, name)
     `)
     .eq('id', id)
     .single();
@@ -813,7 +821,7 @@ export async function approveTripRequest(input: ApproveTripRequestInput): Promis
     .eq('status', 'pending')
     .select(`
       *,
-      department:departments!department_id(id, name)
+      department:departments!left(id, name)
     `)
     .single();
 
@@ -843,7 +851,7 @@ export async function rejectTripRequest(input: RejectTripRequestInput): Promise<
     .eq('status', 'pending')
     .select(`
       *,
-      department:departments!department_id(id, name)
+      department:departments!left(id, name)
     `)
     .single();
 
@@ -879,12 +887,14 @@ export async function assignTripRequest(input: AssignTripRequestInput): Promise<
     throw new Error('Selected vehicle is not available for this time period');
   }
 
-  const driverAvailability = await checkDriverAvailability(
-    input.assigned_driver_id,
-    request.start_datetime,
-    request.end_datetime,
-    input.id
-  );
+  const driverAvailability = input.assigned_driver_id
+    ? await checkDriverAvailability(
+        input.assigned_driver_id,
+        request.start_datetime,
+        request.end_datetime,
+        input.id
+      )
+    : { is_available: true };
 
   if (!driverAvailability.is_available) {
     throw new Error('Selected driver is not available for this time period');
@@ -895,7 +905,7 @@ export async function assignTripRequest(input: AssignTripRequestInput): Promise<
     .update({
       status: 'assigned',
       assigned_vehicle_id: input.assigned_vehicle_id,
-      assigned_driver_id: input.assigned_driver_id,
+      assigned_driver_id: input.assigned_driver_id || null,
       assigned_by: user?.id,
       assigned_at: new Date().toISOString(),
     })
@@ -953,7 +963,7 @@ export async function getFleetDashboardStats(): Promise<FleetDashboardStats> {
     .eq('status', 'pending');
 
   // Get today's trips
-  const today = new Date().toISOString().split('T')[0];
+  const today = new Date().toLocaleDateString('en-CA', { timeZone: 'Africa/Nairobi' });
   const { count: todaysTrips } = await supabase
     .from('trip_requests')
     .select('*', { count: 'exact', head: true })
@@ -964,7 +974,7 @@ export async function getFleetDashboardStats(): Promise<FleetDashboardStats> {
   // Get upcoming alerts (licenses, insurance, service)
   const thirtyDaysFromNow = new Date();
   thirtyDaysFromNow.setDate(thirtyDaysFromNow.getDate() + 30);
-  const thirtyDaysStr = thirtyDaysFromNow.toISOString().split('T')[0];
+  const thirtyDaysStr = thirtyDaysFromNow.toLocaleDateString('en-CA', { timeZone: 'Africa/Nairobi' });
 
   // Get expiring licenses - fetch driver profiles and user profiles separately
   const { data: expiringDrivers } = await supabase
@@ -1069,12 +1079,12 @@ export async function getPendingDepartmentApprovals(): Promise<TripRequest[]> {
     .eq('id', user.id)
     .single();
 
-  if (!profile || (profile.role !== 'hod' && profile.role !== 'super_admin' && profile.role !== 'fleet_manager')) {
+  if (!profile || (profile.role !== 'hod' && profile.role !== 'super_admin' && profile.role !== 'fleet_manager' && profile.role !== 'hr_admin')) {
     return [];
   }
 
-  // For fleet_manager and super_admin, show all pending
-  if (profile.role === 'fleet_manager' || profile.role === 'super_admin') {
+  // For fleet_manager, super_admin, and hr_admin show all pending
+  if (profile.role === 'fleet_manager' || profile.role === 'super_admin' || profile.role === 'hr_admin') {
     return getTripRequests({ status: 'pending' });
   }
 
@@ -1099,6 +1109,10 @@ export async function getAwaitingAssignment(): Promise<TripRequest[]> {
 /**
  * Get driver's assigned trips
  */
+export async function getTripRequestsByDriver(driverId: string): Promise<TripRequest[]> {
+  return getTripRequests({ driver_id: driverId });
+}
+
 export async function getDriverAssignedTrips(): Promise<TripRequest[]> {
   const { data: { user } } = await supabase.auth.getUser();
   

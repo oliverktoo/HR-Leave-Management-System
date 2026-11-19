@@ -40,6 +40,7 @@ interface PolicySettings {
   block_overlapping_requests: boolean;
   
   // Location & Attendance Settings
+  enforce_geofence: boolean;
   office_latitude: number;
   office_longitude: number;
   geofence_radius: number;
@@ -88,6 +89,7 @@ const PolicySettings = () => {
     block_overlapping_requests: true,
     
     // Location & Attendance Settings
+    enforce_geofence: false,
     office_latitude: -1.2517,
     office_longitude: 36.7989,
     geofence_radius: 100,
@@ -239,6 +241,7 @@ const PolicySettings = () => {
       max_future_booking_months: 12,
       require_manager_coverage: true,
       block_overlapping_requests: true,
+      enforce_geofence: false,
       office_latitude: -1.2517,
       office_longitude: 36.7989,
       geofence_radius: 100,
@@ -902,6 +905,24 @@ const PolicySettings = () => {
             </div>
             
             <div className="settings-grid">
+              <div className="setting-card">
+                <label className="setting-label">
+                  <span className="label-icon">🔒</span>
+                  Enforce Geofence on Check-In
+                </label>
+                <div className="setting-control">
+                  <label className="toggle-switch">
+                    <input
+                      type="checkbox"
+                      checked={settings.enforce_geofence}
+                      onChange={(e) => handleSettingChange('enforce_geofence', e.target.checked)}
+                    />
+                    <span className="toggle-slider"></span>
+                  </label>
+                </div>
+                <p className="setting-help">Block check-ins when staff are outside the configured office boundary</p>
+              </div>
+
               <div className="setting-card">
                 <label className="setting-label">
                   <span className="label-icon">🌍</span>

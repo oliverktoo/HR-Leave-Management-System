@@ -6,7 +6,7 @@ export const LoadingScreen = () => {
       <div className="loading-content">
         <div className="loading-logo-container">
           <img 
-            src="/fkf-logo.jpeg" 
+            src="/fkf-logo.png" 
             alt="FKF Logo" 
             className="loading-logo"
           />

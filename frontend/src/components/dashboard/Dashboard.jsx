@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useAuth } from '../../hooks/useAuth';
 import { useNavigate } from 'react-router-dom';
 import { getLeaveBalances, getLeaveRequests } from '../../services/leaveService';
+import { getTodayAttendance } from '../../services/attendanceService';
 import { formatEmployeeId } from '../../utils/formatters';
 import NotificationBell from '../notifications/NotificationBell';
 
@@ -12,22 +13,48 @@ export const Dashboard = () => {
   const [recentRequests, setRecentRequests] = useState([]);
   const [loading, setLoading] = useState(true);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [showClockInReminder, setShowClockInReminder] = useState(false);
 
   useEffect(() => {
     loadDashboardData();
-    
+    checkClockInStatus();
+
     // Listen for leave request updates
     const handleLeaveRequestUpdate = () => {
       console.log('Leave request updated, refreshing employee dashboard...');
       loadDashboardData();
     };
-    
+
     window.addEventListener('leaveRequestUpdated', handleLeaveRequestUpdate);
-    
+
     return () => {
       window.removeEventListener('leaveRequestUpdated', handleLeaveRequestUpdate);
     };
   }, [profile?.id]);
+
+  const checkClockInStatus = async () => {
+    if (!profile?.id) return;
+    // Only show for non-admin roles (employees and drivers need to clock in)
+    const adminRoles = ['super_admin', 'hr_admin'];
+    if (adminRoles.includes(profile?.role)) return;
+    // Only show once per session
+    const sessionKey = `clockin_reminder_dismissed_${new Date().toDateString()}`;
+    if (sessionStorage.getItem(sessionKey)) return;
+    try {
+      const { data: todayRecord } = await getTodayAttendance();
+      if (!todayRecord) {
+        setShowClockInReminder(true);
+      }
+    } catch {
+      // non-critical — don't show reminder on error
+    }
+  };
+
+  const dismissClockInReminder = () => {
+    const sessionKey = `clockin_reminder_dismissed_${new Date().toDateString()}`;
+    sessionStorage.setItem(sessionKey, '1');
+    setShowClockInReminder(false);
+  };
 
   const loadDashboardData = async () => {
     if (!profile?.id) return;
@@ -75,6 +102,58 @@ export const Dashboard = () => {
 
   return (
     <div className="app">
+
+      {/* ── Clock-in reminder popup ───────────────────────────────────────── */}
+      {showClockInReminder && (
+        <div style={{
+          position: 'fixed', inset: 0, zIndex: 2000,
+          background: 'rgba(0,0,0,0.45)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          padding: '20px',
+        }}>
+          <div style={{
+            background: '#fff', borderRadius: 16, maxWidth: 360, width: '100%',
+            boxShadow: '0 20px 60px rgba(0,0,0,0.25)',
+            overflow: 'hidden',
+          }}>
+            {/* Coloured top bar */}
+            <div style={{ background: '#4f46e5', padding: '20px 24px 16px' }}>
+              <div style={{ fontSize: 36, marginBottom: 8 }}>🕐</div>
+              <h3 style={{ margin: 0, color: '#fff', fontSize: '1.15rem', fontWeight: 700 }}>
+                Don't forget to clock in!
+              </h3>
+            </div>
+            <div style={{ padding: '20px 24px' }}>
+              <p style={{ margin: '0 0 20px', color: '#374151', fontSize: '0.9rem', lineHeight: 1.5 }}>
+                You haven't clocked in for work today. Head to attendance to record your arrival.
+              </p>
+              <div style={{ display: 'flex', gap: 10 }}>
+                <button
+                  onClick={dismissClockInReminder}
+                  style={{
+                    flex: 1, padding: '10px 0', border: '1px solid #e5e7eb',
+                    borderRadius: 8, background: '#fff', color: '#6b7280',
+                    cursor: 'pointer', fontSize: '0.875rem', fontWeight: 500,
+                  }}
+                >
+                  Remind me later
+                </button>
+                <button
+                  onClick={() => { dismissClockInReminder(); navigate('/attendance'); }}
+                  style={{
+                    flex: 1, padding: '10px 0', border: 'none',
+                    borderRadius: 8, background: '#4f46e5', color: '#fff',
+                    cursor: 'pointer', fontSize: '0.875rem', fontWeight: 600,
+                  }}
+                >
+                  Clock In Now →
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Mobile Menu Toggle Button */}
       <button
         className={`mobile-menu-toggle ${sidebarOpen ? 'menu-open' : ''}`}
@@ -94,31 +173,33 @@ export const Dashboard = () => {
       <div className={`sidebar ${sidebarOpen ? 'sidebar-open' : ''}`}>
         <div className="sidebar-header">
           <h1 className="sidebar-title">FKF HR</h1>
-          <p className="sidebar-subtitle">Leave Management System</p>
+          <p className="sidebar-subtitle">Employee Self-Service</p>
         </div>
         
         <nav className="sidebar-nav">
-          {(profile?.role === 'hr_admin' || profile?.role === 'super_admin') && (
+          {/* Back to Admin — only visible to admin roles */}
+          {(profile?.role === 'hr_admin' || profile?.role === 'super_admin' || profile?.role === 'hod' || profile?.role === 'fleet_manager' || profile?.role === 'finance' || profile?.role === 'ceo' || profile?.role === 'auditor') && (
             <>
               <div className="nav-item">
-                <button 
+                <button
                   onClick={() => handleNavigation('/admin/dashboard')}
                   className="nav-link nav-link-inactive w-full text-left"
-                  style={{ 
-                    background: 'linear-gradient(135deg, rgba(99, 102, 241, 0.2) 0%, rgba(139, 92, 246, 0.2) 100%)',
-                    borderLeft: '3px solid rgb(99, 102, 241)'
+                  style={{
+                    background: 'linear-gradient(135deg, rgba(99,102,241,0.18) 0%, rgba(139,92,246,0.18) 100%)',
+                    borderLeft: '3px solid rgb(99,102,241)',
                   }}
                 >
                   <span className="nav-icon">🏛️</span>
-                  Admin Dashboard
+                  ← Back to Admin
                 </button>
               </div>
               <div className="nav-divider"></div>
             </>
           )}
-          
+
+          {/* ── My Leave ─────────────────────────────── */}
           <div className="nav-item">
-            <button 
+            <button
               onClick={() => handleNavigation('/dashboard')}
               className="nav-link nav-link-active w-full text-left"
             >
@@ -127,7 +208,16 @@ export const Dashboard = () => {
             </button>
           </div>
           <div className="nav-item">
-            <button 
+            <button
+              onClick={() => handleNavigation('/attendance')}
+              className="nav-link nav-link-inactive w-full text-left"
+            >
+              <span className="nav-icon">🕐</span>
+              Attendance
+            </button>
+          </div>
+          <div className="nav-item">
+            <button
               onClick={() => handleNavigation('/request-leave')}
               className="nav-link nav-link-inactive w-full text-left"
             >
@@ -136,7 +226,7 @@ export const Dashboard = () => {
             </button>
           </div>
           <div className="nav-item">
-            <button 
+            <button
               onClick={() => handleNavigation('/leave-history')}
               className="nav-link nav-link-inactive w-full text-left"
             >
@@ -145,16 +235,94 @@ export const Dashboard = () => {
             </button>
           </div>
           <div className="nav-item">
-            <button 
+            <button
+              onClick={() => handleNavigation('/attendance/ooo/new')}
+              className="nav-link nav-link-inactive w-full text-left"
+            >
+              <span className="nav-icon">📤</span>
+              OOO Request
+            </button>
+          </div>
+          <div className="nav-item">
+            <button
+              onClick={() => handleNavigation('/attendance/ooo/my-requests')}
+              className="nav-link nav-link-inactive w-full text-left"
+            >
+              <span className="nav-icon">📑</span>
+              My OOO
+            </button>
+          </div>
+          <div className="nav-item">
+            <button
+              onClick={() => handleNavigation('/attendance/field/clock-in')}
+              className="nav-link nav-link-inactive w-full text-left"
+            >
+              <span className="nav-icon">⏰</span>
+              Field Clock-In
+            </button>
+          </div>
+
+          <div className="nav-divider"></div>
+
+          {/* ── Fleet ─────────────────────────────────── */}
+          {profile?.role === 'driver' ? (
+            <>
+              <div className="nav-item">
+                <button
+                  onClick={() => handleNavigation('/fleet/driver-dashboard')}
+                  className="nav-link nav-link-inactive w-full text-left"
+                >
+                  <span className="nav-icon">🚗</span>
+                  Driver Dashboard
+                </button>
+              </div>
+              <div className="nav-item">
+                <button
+                  onClick={() => handleNavigation('/fleet/my-trips')}
+                  className="nav-link nav-link-inactive w-full text-left"
+                >
+                  <span className="nav-icon">📋</span>
+                  My Trips
+                </button>
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="nav-item">
+                <button
+                  onClick={() => handleNavigation('/fleet/my-trips')}
+                  className="nav-link nav-link-inactive w-full text-left"
+                >
+                  <span className="nav-icon">🚗</span>
+                  My Trip Requests
+                </button>
+              </div>
+              <div className="nav-item">
+                <button
+                  onClick={() => handleNavigation('/fleet/trip-request/new')}
+                  className="nav-link nav-link-inactive w-full text-left"
+                >
+                  <span className="nav-icon">➕</span>
+                  Request Trip
+                </button>
+              </div>
+            </>
+          )}
+
+          <div className="nav-divider"></div>
+
+          {/* ── Personal ──────────────────────────────── */}
+          <div className="nav-item">
+            <button
               onClick={() => handleNavigation('/documents')}
               className="nav-link nav-link-inactive w-full text-left"
             >
               <span className="nav-icon">📄</span>
-              Documents
+              My Documents
             </button>
           </div>
           <div className="nav-item">
-            <button 
+            <button
               onClick={() => handleNavigation('/reports')}
               className="nav-link nav-link-inactive w-full text-left"
             >
@@ -163,68 +331,79 @@ export const Dashboard = () => {
             </button>
           </div>
           <div className="nav-item">
-            <button 
-              onClick={() => handleNavigation('/attendance')}
+            <button
+              onClick={() => handleNavigation('/payroll/my-payslips')}
               className="nav-link nav-link-inactive w-full text-left"
             >
-              <span className="nav-icon">🕐</span>
-              Attendance
-            </button>
-          </div>
-          {(profile?.role === 'hod' || profile?.role === 'hr_admin' || profile?.role === 'super_admin') && (
-            <>
-              <div className="nav-item">
-                <button 
-                  onClick={() => handleNavigation('/approvals')}
-                  className="nav-link nav-link-inactive w-full text-left"
-                >
-                  <span className="nav-icon">✅</span>
-                  Approvals
-                </button>
-              </div>
-              <div className="nav-item">
-                <button 
-                  onClick={() => handleNavigation('/team-calendar')}
-                  className="nav-link nav-link-inactive w-full text-left"
-                >
-                  <span className="nav-icon">📅</span>
-                  Team Calendar
-                </button>
-              </div>
-            </>
-          )}
-          <div className="nav-divider"></div>
-          <div className="nav-item">
-            <button 
-              onClick={() => handleNavigation('/fleet/my-trips')}
-              className="nav-link nav-link-inactive w-full text-left"
-            >
-              <span className="nav-icon">🚗</span>
-              My Trip Requests
+              <span className="nav-icon">💵</span>
+              My Payslips
             </button>
           </div>
           <div className="nav-item">
-            <button 
-              onClick={() => handleNavigation('/fleet/trip-request/new')}
+            <button
+              onClick={() => handleNavigation('/my-assets')}
               className="nav-link nav-link-inactive w-full text-left"
             >
-              <span className="nav-icon">➕</span>
-              Request Trip
+              <span className="nav-icon">💻</span>
+              My Assets
             </button>
           </div>
-          {(profile?.role === 'hod' || profile?.role === 'hr_admin' || profile?.role === 'super_admin') && (
-            <div className="nav-item">
-              <button 
-                onClick={() => handleNavigation('/fleet/trip-approvals')}
-                className="nav-link nav-link-inactive w-full text-left"
-              >
-                <span className="nav-icon">✅</span>
-                Trip Approvals
-              </button>
-            </div>
-          )}
+          <div className="nav-item">
+            <button
+              onClick={() => handleNavigation('/my-schedule')}
+              className="nav-link nav-link-inactive w-full text-left"
+            >
+              <span className="nav-icon">🗓️</span>
+              My Schedule
+            </button>
+          </div>
+          <div className="nav-item">
+            <button
+              onClick={() => handleNavigation('/my-training')}
+              className="nav-link nav-link-inactive w-full text-left"
+            >
+              <span className="nav-icon">🎓</span>
+              My Training
+            </button>
+          </div>
+          <div className="nav-item">
+            <button
+              onClick={() => handleNavigation('/my-overtime')}
+              className="nav-link nav-link-inactive w-full text-left"
+            >
+              <span className="nav-icon">⏱️</span>
+              Overtime
+            </button>
+          </div>
+          <div className="nav-item">
+            <button
+              onClick={() => handleNavigation('/my-appraisal')}
+              className="nav-link nav-link-inactive w-full text-left"
+            >
+              <span className="nav-icon">🌟</span>
+              My Appraisal
+            </button>
+          </div>
+          <div className="nav-item">
+            <button
+              onClick={() => handleNavigation('/my-benefits')}
+              className="nav-link nav-link-inactive w-full text-left"
+            >
+              <span className="nav-icon">🏥</span>
+              My Benefits
+            </button>
+          </div>
+          <div className="nav-item">
+            <button
+              onClick={() => handleNavigation('/announcements')}
+              className="nav-link nav-link-inactive w-full text-left"
+            >
+              <span className="nav-icon">📢</span>
+              Announcements
+            </button>
+          </div>
         </nav>
-        
+
         <div className="sidebar-footer">
           <div className="user-profile">
             <div className="user-avatar">

@@ -23,7 +23,11 @@
     "esModuleInterop": true,
     "allowSyntheticDefaultImports": true,
     "forceConsistentCasingInFileNames": true,
-    "resolveJsonModule": true
+    "resolveJsonModule": true,
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["src/*"]
+    }
   },
   "include": ["src"],
   "exclude": ["**/*-Old.jsx", "**/*-Backup.jsx", "**/*-Updated.jsx", "**/*-Fixed.jsx", "**/*-Complex.jsx"]

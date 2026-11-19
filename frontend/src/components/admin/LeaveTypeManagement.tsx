@@ -15,6 +15,7 @@ interface LeaveTypeFormData {
   max_consecutive_days: number;
   color: string;
   is_active: boolean;
+  is_paid: boolean;
 }
 
 const LeaveTypeManagement = () => {
@@ -35,7 +36,8 @@ const LeaveTypeManagement = () => {
     min_notice_days: 1,
     max_consecutive_days: 365,
     color: '#3b82f6',
-    is_active: true
+    is_active: true,
+    is_paid: true,
   });
 
   // Load leave types when component mounts
@@ -86,9 +88,10 @@ const LeaveTypeManagement = () => {
         min_notice_days: 1,
         max_consecutive_days: 365,
         color: '#3b82f6',
-        is_active: true
+        is_active: true,
+        is_paid: true,
       });
-      
+
       loadLeaveTypes();
       alert('Leave type created successfully!');
       
@@ -167,8 +170,9 @@ const LeaveTypeManagement = () => {
       requires_documentation: leaveType.requires_documentation,
       min_notice_days: leaveType.min_notice_days,
       max_consecutive_days: leaveType.max_consecutive_days,
-      color: leaveType.color,
-      is_active: true
+      color: leaveType.color ?? '',
+      is_active: true,
+      is_paid: (leaveType as any).is_paid ?? true
     });
     setShowAddModal(true);
   };
@@ -493,6 +497,17 @@ const LeaveTypeManagement = () => {
                       <span className="checkbox-text">Requires Supporting Documentation</span>
                     </label>
                   </div>
+                  <div className="form-group checkbox-group">
+                    <label className="checkbox-label">
+                      <input
+                        type="checkbox"
+                        checked={newLeaveType.is_paid}
+                        onChange={(e) => setNewLeaveType({...newLeaveType, is_paid: e.target.checked})}
+                      />
+                      <span className="checkbox-text">Paid Leave (no salary deduction)</span>
+                    </label>
+                    <small className="form-help">Uncheck for unpaid leave — payroll will prorate salary</small>
+                  </div>
                 </div>
 
                 {/* Carryforward Rules */}
@@ -696,6 +711,17 @@ const LeaveTypeManagement = () => {
                       <span className="checkbox-text">Requires Documentation</span>
                     </label>
                     <small className="form-help">Employee must upload supporting documents</small>
+                  </div>
+                  <div className="form-group checkbox-group">
+                    <label className="checkbox-label">
+                      <input
+                        type="checkbox"
+                        checked={(selectedLeaveType as LeaveType & { is_paid?: boolean }).is_paid ?? true}
+                        onChange={(e) => setSelectedLeaveType({...selectedLeaveType, is_paid: e.target.checked} as typeof selectedLeaveType)}
+                      />
+                      <span className="checkbox-text">Paid Leave (no salary deduction)</span>
+                    </label>
+                    <small className="form-help">Uncheck for unpaid leave — payroll will prorate salary</small>
                   </div>
                 </div>
 

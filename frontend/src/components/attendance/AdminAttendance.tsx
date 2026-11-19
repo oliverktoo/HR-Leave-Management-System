@@ -11,11 +11,15 @@ import {
   exportAttendanceToCSV,
   updateAttendanceRecord,
   deleteAttendanceRecord,
+  getEmployeeAttendanceReport,
   type AttendanceRecord,
   type AttendanceSummary,
-  type AttendanceSettings
+  type AttendanceSettings,
+  type OOOAttendanceRow,
 } from '../../services/attendanceService';
 import { formatEmployeeId } from '../../utils/formatters';
+import { jsPDF } from 'jspdf';
+import autoTable from 'jspdf-autotable';
 
 export const AdminAttendance = () => {
   const { profile } = useAuth();
@@ -34,10 +38,14 @@ export const AdminAttendance = () => {
   const [departmentName, setDepartmentName] = useState('');
   const [employeeId, setEmployeeId] = useState('');
   
+  // OOO rows merged with attendance when single employee is filtered
+  const [oooRows, setOooRows] = useState<OOOAttendanceRow[]>([]);
+  const [reportDownloading, setReportDownloading] = useState(false);
+
   // Edit mode
   const [editingRecord, setEditingRecord] = useState<string | null>(null);
   const [editForm, setEditForm] = useState<Partial<AttendanceRecord>>({});
-  
+
   // Settings edit
   const [editingSettings, setEditingSettings] = useState(false);
   const [settingsForm, setSettingsForm] = useState<Partial<AttendanceSettings>>({});
@@ -88,22 +96,32 @@ export const AdminAttendance = () => {
   };
 
   const loadAttendanceRecords = async () => {
-    // For HODs, always filter by their department
-    const deptFilter = (profile?.role as string) === 'hod' && profile?.department_id 
-      ? profile.department_id 
+    const deptFilter = (profile?.role as string) === 'hod' && profile?.department_id
+      ? profile.department_id
       : (department || undefined);
-    
+
     const { data, error: fetchError } = await getAllAttendanceRecords(
       startDate || undefined,
       endDate || undefined,
       deptFilter,
       employeeId || undefined
     );
-    
+
     if (fetchError) {
       setError('Failed to load attendance records');
     } else {
       setAttendanceRecords(data || []);
+    }
+
+    // When filtering by a single employee, also load OOO rows
+    if (employeeId) {
+      const s = startDate || new Date(new Date().setMonth(new Date().getMonth() - 1)).toLocaleDateString('en-CA', { timeZone: 'Africa/Nairobi' });
+      const e = endDate   || new Date().toLocaleDateString('en-CA', { timeZone: 'Africa/Nairobi' });
+      const { data: merged } = await getEmployeeAttendanceReport(employeeId, s, e);
+      // Keep only the OOO rows (attendance rows are already in attendanceRecords)
+      setOooRows((merged || []).filter(r => r.row_type === 'ooo'));
+    } else {
+      setOooRows([]);
     }
   };
 
@@ -142,11 +160,82 @@ export const AdminAttendance = () => {
     setEndDate('');
     setDepartment('');
     setEmployeeId('');
+    setOooRows([]);
+  };
+
+  const handleDownloadEmployeeReport = async () => {
+    if (!employeeId) return;
+    setReportDownloading(true);
+    const s = startDate || new Date(new Date().setMonth(new Date().getMonth() - 1)).toLocaleDateString('en-CA', { timeZone: 'Africa/Nairobi' });
+    const e = endDate   || new Date().toLocaleDateString('en-CA', { timeZone: 'Africa/Nairobi' });
+
+    const { data: rows, employeeName, department: dept } = await getEmployeeAttendanceReport(employeeId, s, e);
+    setReportDownloading(false);
+    if (!rows) { setError('Failed to generate report'); return; }
+
+    const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
+
+    doc.setFontSize(16); doc.setFont('helvetica', 'bold');
+    doc.text('Football Kenya Federation — Attendance Report', 148, 16, { align: 'center' });
+    doc.setFontSize(10); doc.setFont('helvetica', 'normal');
+    doc.text(`Employee: ${employeeName || employeeId}  |  ID: ${formatEmployeeId(employeeId)}  |  Department: ${dept || '—'}`, 148, 24, { align: 'center' });
+    doc.text(`Period: ${s} to ${e}  |  Generated: ${new Date().toLocaleDateString('en-GB', { timeZone: 'Africa/Nairobi' })} ${new Date().toLocaleTimeString('en-GB', { timeZone: 'Africa/Nairobi' })}`, 148, 30, { align: 'center' });
+
+    const tableRows = rows.map(r => {
+      if (r.row_type === 'ooo') {
+        return [
+          r.date,
+          'OOO',
+          r.ooo_title || r.ooo_type || 'OOO',
+          '—',
+          '—',
+          '—',
+          r.ooo_type?.replace(/_/g, ' ') || '',
+        ];
+      }
+      const cin = r.check_in_time ? new Date(r.check_in_time).toLocaleTimeString('en-GB', { timeZone: 'Africa/Nairobi', hour: '2-digit', minute: '2-digit' }) : '—';
+      const cout = r.check_out_time ? new Date(r.check_out_time).toLocaleTimeString('en-GB', { timeZone: 'Africa/Nairobi', hour: '2-digit', minute: '2-digit' }) : '—';
+      return [
+        r.date,
+        r.status?.replace(/_/g, ' ').toUpperCase() || '—',
+        'Office',
+        cin,
+        cout,
+        r.work_hours != null ? `${r.work_hours.toFixed(2)}h` : '—',
+        r.notes || '',
+      ];
+    });
+
+    autoTable(doc, {
+      startY: 36,
+      head: [['Date', 'Status', 'Location / Assignment', 'Check In', 'Check Out', 'Hours', 'Notes']],
+      body: tableRows,
+      styles: { fontSize: 9, cellPadding: 3 },
+      headStyles: { fillColor: [79, 70, 229], textColor: 255, fontStyle: 'bold' },
+      alternateRowStyles: { fillColor: [248, 248, 255] },
+      didParseCell: (data: any) => {
+        if (data.row.raw[1] === 'OOO') {
+          data.cell.styles.fillColor = [224, 247, 250];
+          data.cell.styles.textColor = [0, 131, 143];
+          data.cell.styles.fontStyle = 'bold';
+        }
+      },
+    });
+
+    // Summary row
+    const present = rows.filter(r => r.row_type === 'attendance').length;
+    const ooo = rows.filter(r => r.row_type === 'ooo').length;
+    const totalHours = rows.reduce((s, r) => s + (r.work_hours || 0), 0);
+    const finalY = (doc as any).lastAutoTable.finalY + 6;
+    doc.setFontSize(9); doc.setFont('helvetica', 'bold');
+    doc.text(`Total: ${rows.length} days recorded  |  ${present} attendance days  |  ${ooo} OOO days  |  ${totalHours.toFixed(2)}h worked`, 15, finalY);
+
+    doc.save(`Attendance_${formatEmployeeId(employeeId)}_${s}_to_${e}.pdf`);
   };
 
   const handleExport = async () => {
-    const start = startDate || new Date(new Date().setMonth(new Date().getMonth() - 1)).toISOString().split('T')[0];
-    const end = endDate || new Date().toISOString().split('T')[0];
+    const start = startDate || new Date(new Date().setMonth(new Date().getMonth() - 1)).toLocaleDateString('en-CA', { timeZone: 'Africa/Nairobi' });
+    const end = endDate || new Date().toLocaleDateString('en-CA', { timeZone: 'Africa/Nairobi' });
     
     // For HODs, always use their department
     const deptFilter = (profile?.role as string) === 'hod' && profile?.department_id 
@@ -225,14 +314,16 @@ export const AdminAttendance = () => {
   };
 
   const formatTime = (dateString: string) => {
-    return new Date(dateString).toLocaleTimeString('en-US', {
+    return new Date(dateString).toLocaleTimeString('en-GB', {
+      timeZone: 'Africa/Nairobi',
       hour: '2-digit',
       minute: '2-digit'
     });
   };
 
   const formatDate = (dateString: string) => {
-    return new Date(dateString).toLocaleDateString('en-US', {
+    return new Date(dateString).toLocaleDateString('en-GB', {
+      timeZone: 'Africa/Nairobi',
       year: 'numeric',
       month: 'short',
       day: 'numeric'
@@ -430,13 +521,28 @@ export const AdminAttendance = () => {
                     <span style={{ marginRight: '0.5rem' }}>📥</span>
                     Export to CSV
                   </button>
+                  {employeeId && (
+                    <button
+                      onClick={handleDownloadEmployeeReport}
+                      disabled={reportDownloading}
+                      className="btn"
+                      style={{ background: '#0891b2', color: '#fff', border: 'none' }}
+                    >
+                      <span style={{ marginRight: '0.5rem' }}>📄</span>
+                      {reportDownloading ? 'Generating…' : 'Download Employee Report (PDF)'}
+                    </button>
+                  )}
                 </div>
               </div>
             </div>
 
             <div className="card">
               <div className="card-header">
-                <h3 className="card-title">Attendance Records ({attendanceRecords.length})</h3>
+                <h3 className="card-title">
+                Attendance Records ({attendanceRecords.length + oooRows.length}
+                {oooRows.length > 0 && <span style={{ fontSize: '0.75rem', color: '#0891b2', fontWeight: 500, marginLeft: 6 }}>incl. {oooRows.length} OOO</span>}
+                )
+              </h3>
               </div>
               
               {/* HOD View-Only Notice */}
@@ -487,12 +593,40 @@ export const AdminAttendance = () => {
                         </tr>
                       </thead>
                       <tbody>
-                      {attendanceRecords.map((record) => {
+                      {/* Merge attendance + OOO rows sorted by date */}
+                      {[
+                        ...attendanceRecords.map(r => ({ type: 'attendance' as const, date: r.date, data: r })),
+                        ...oooRows.map(r => ({ type: 'ooo' as const, date: r.date, data: r })),
+                      ].sort((a, b) => a.date < b.date ? -1 : a.date > b.date ? 1 : 0).map((item) => {
+                        if (item.type === 'ooo') {
+                          const row = item.data as OOOAttendanceRow;
+                          return (
+                            <tr key={row.id} style={{ borderBottom: '1px solid #b2ebf2', background: '#e0f7fa' }}>
+                              <td style={{ padding: '0.75rem 1rem', fontSize: '0.875rem', color: '#006064' }}>{formatDate(row.date)}</td>
+                              <td style={{ padding: '0.75rem 1rem', fontSize: '0.875rem', color: '#006064' }}>{formatEmployeeId(row.employee_id)}</td>
+                              <td style={{ padding: '0.75rem 1rem', fontSize: '0.875rem', color: '#006064', fontWeight: 600 }}>{row.employee_name}</td>
+                              <td style={{ padding: '0.75rem 1rem', fontSize: '0.875rem', color: '#006064' }}>—</td>
+                              <td style={{ padding: '0.75rem 1rem', fontSize: '0.875rem', color: '#00838f' }}>—</td>
+                              <td style={{ padding: '0.75rem 1rem', fontSize: '0.875rem', color: '#00838f' }}>—</td>
+                              <td style={{ padding: '0.75rem 1rem', fontSize: '0.875rem', color: '#00838f' }}>
+                                📤 {row.ooo_title || row.ooo_type}
+                              </td>
+                              <td style={{ padding: '0.75rem 1rem' }}>
+                                <span style={{ background: '#00838f', color: '#fff', padding: '2px 8px', borderRadius: 4, fontSize: 12, fontWeight: 700 }}>OOO</span>
+                              </td>
+                              {(profile?.role as string) !== 'hod' && (
+                                <td style={{ padding: '0.75rem 1rem', fontSize: '0.875rem', color: '#00838f', fontStyle: 'italic' }}>—</td>
+                              )}
+                            </tr>
+                          );
+                        }
+
+                        const record = item.data as AttendanceRecord;
                         const userProfile = (record as any).users_profile;
-                        const employeeName = userProfile 
+                        const employeeName = userProfile
                           ? `${userProfile.first_name || ''} ${userProfile.last_name || ''}`.trim()
                           : record.employee_name;
-                        
+
                         return (
                           <tr key={record.id} style={{ borderBottom: '1px solid var(--gray-200)' }}>
                             <td style={{ padding: '0.75rem 1rem', fontSize: '0.875rem' }}>{formatDate(record.date)}</td>
@@ -504,10 +638,12 @@ export const AdminAttendance = () => {
                               <input
                                 type="time"
                                 className="form-input-small"
-                                value={editForm.check_in_time?.slice(11, 16) || ''}
+                                value={editForm.check_in_time
+                                  ? new Date(editForm.check_in_time).toLocaleTimeString('en-GB', { timeZone: 'Africa/Nairobi', hour: '2-digit', minute: '2-digit' })
+                                  : ''}
                                 onChange={(e) => setEditForm({
                                   ...editForm,
-                                  check_in_time: `${record.date}T${e.target.value}:00`
+                                  check_in_time: `${record.date}T${e.target.value}:00+03:00`
                                 })}
                               />
                             ) : (
@@ -519,10 +655,12 @@ export const AdminAttendance = () => {
                               <input
                                 type="time"
                                 className="form-input-small"
-                                value={editForm.check_out_time?.slice(11, 16) || ''}
+                                value={editForm.check_out_time
+                                  ? new Date(editForm.check_out_time).toLocaleTimeString('en-GB', { timeZone: 'Africa/Nairobi', hour: '2-digit', minute: '2-digit' })
+                                  : ''}
                                 onChange={(e) => setEditForm({
                                   ...editForm,
-                                  check_out_time: e.target.value ? `${record.date}T${e.target.value}:00` : null
+                                  check_out_time: e.target.value ? `${record.date}T${e.target.value}:00+03:00` : null
                                 })}
                               />
                             ) : record.check_out_time ? (

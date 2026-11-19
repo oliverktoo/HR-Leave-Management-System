@@ -2,6 +2,30 @@
  * Utility functions for formatting data throughout the application
  */
 
+const EAT = 'Africa/Nairobi';
+
+/** Date only — e.g. "03 May 2026" */
+export const formatDate = (d) => {
+  if (!d) return '—';
+  return new Date(d).toLocaleDateString('en-GB', { timeZone: EAT, day: '2-digit', month: 'short', year: 'numeric' });
+};
+
+/** Date + time — e.g. "03 May 2026, 14:30" */
+export const formatDateTime = (d) => {
+  if (!d) return '—';
+  return new Date(d).toLocaleString('en-GB', { timeZone: EAT, day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+};
+
+/** Time only — e.g. "14:30" */
+export const formatTime = (d) => {
+  if (!d) return '—';
+  return new Date(d).toLocaleTimeString('en-GB', { timeZone: EAT, hour: '2-digit', minute: '2-digit' });
+};
+
+/** Today's date as YYYY-MM-DD in EAT */
+export const todayEAT = () =>
+  new Date().toLocaleDateString('en-CA', { timeZone: EAT }); // en-CA → YYYY-MM-DD
+
 /**
  * Format employee ID to FKF#### format
  * @param {string|number} id - The employee ID to format

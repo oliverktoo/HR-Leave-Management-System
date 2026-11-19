@@ -64,17 +64,11 @@ export const StaffReports = () => {
     }
   }, [profile?.id, timeRange]);
 
-  // Format date without timezone issues
   const formatDate = (dateString: string) => {
     if (!dateString) return 'N/A';
-    const date = new Date(dateString);
-    // Add timezone offset to get correct local date
-    const userTimezoneOffset = date.getTimezoneOffset() * 60000;
-    const localDate = new Date(date.getTime() + userTimezoneOffset);
-    return localDate.toLocaleDateString('en-US', {
-      year: 'numeric',
-      month: 'short',
-      day: 'numeric'
+    return new Date(dateString).toLocaleDateString('en-GB', {
+      timeZone: 'Africa/Nairobi',
+      year: 'numeric', month: 'short', day: 'numeric',
     });
   };
 
@@ -179,12 +173,9 @@ export const StaffReports = () => {
       const monthlyData: { [key: string]: { days: number; requests: number } } = {};
       
       data.forEach((request: any) => {
-        const date = new Date(request.start_date);
-        const userTimezoneOffset = date.getTimezoneOffset() * 60000;
-        const localDate = new Date(date.getTime() + userTimezoneOffset);
-        const month = localDate.toLocaleDateString('en-US', { 
-          year: 'numeric', 
-          month: 'short' 
+        const month = new Date(request.start_date).toLocaleDateString('en-US', {
+          timeZone: 'Africa/Nairobi',
+          year: 'numeric', month: 'short',
         });
         
         if (!monthlyData[month]) {
