@@ -22,20 +22,29 @@ export function EmployeePayrollProfiles() {
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState('');
 
+  const [showInactiveStaff, setShowInactiveStaff] = useState(false);
+  const [mismatchOnly, setMismatchOnly] = useState(false);
+
   useEffect(() => {
-    Promise.all([getEmployeePayrollProfiles(), getSalaryGrades()])
+    setLoading(true);
+    Promise.all([getEmployeePayrollProfiles(showInactiveStaff), getSalaryGrades()])
       .then(([emps, gs]) => { setEmployees(emps); setGrades(gs); })
       .catch(e => setError(e.message))
       .finally(() => setLoading(false));
-  }, []);
+  }, [showInactiveStaff]);
+
+  // Staff account and payroll status disagree (e.g. left but still on payroll)
+  const isMismatch = (e: EmployeePayrollProfile) => (e.is_active !== false) !== e.payroll_active;
 
   const filtered = employees.filter(e => {
     const term = search.toLowerCase();
+    if (mismatchOnly && !isMismatch(e)) return false;
     return (
       `${e.first_name} ${e.last_name}`.toLowerCase().includes(term) ||
       (e.employee_id ?? '').toLowerCase().includes(term)
     );
   });
+  const mismatchCount = employees.filter(isMismatch).length;
 
   async function handleSave() {
     if (!editing) return;
@@ -118,6 +127,22 @@ export function EmployeePayrollProfiles() {
         </div>
       </div>
 
+      <div style={{ display: 'flex', gap: '1.5rem', alignItems: 'center', marginBottom: '1rem', flexWrap: 'wrap', fontSize: '0.875rem' }}>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
+          <input type="checkbox" checked={showInactiveStaff} onChange={e => setShowInactiveStaff(e.target.checked)} />
+          Show deactivated staff
+        </label>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
+          <input type="checkbox" checked={mismatchOnly} onChange={e => setMismatchOnly(e.target.checked)} />
+          Only staff whose account and payroll status differ
+          {mismatchCount > 0 && (
+            <span style={{ background: '#fef3c7', color: '#92400e', borderRadius: 9999, padding: '0 8px', fontWeight: 600 }}>
+              {mismatchCount}
+            </span>
+          )}
+        </label>
+      </div>
+
       <div className="card">
         <div className="table-container">
           <table className="data-table">
@@ -138,7 +163,14 @@ export function EmployeePayrollProfiles() {
                 <tr key={emp.id}>
                   <td>
                     <strong>{emp.first_name} {emp.last_name}</strong>
-                    <div style={{ fontSize: '0.75rem', color: '#94a3b8' }}>{emp.employee_id}</div>
+                    <div style={{ fontSize: '0.75rem', color: '#94a3b8' }}>
+                      {emp.employee_id}
+                      {emp.is_active === false && (
+                        <span style={{ marginLeft: 6, color: '#991b1b', background: '#fee2e2', borderRadius: 4, padding: '0 6px' }}>
+                          Account deactivated
+                        </span>
+                      )}
+                    </div>
                   </td>
                   <td style={{ textTransform: 'capitalize' }}>{emp.employment_type}</td>
                   <td>{formatKES(emp.basic_salary)}</td>
@@ -268,6 +300,12 @@ export function EmployeePayrollProfiles() {
                 />
                 Include in payroll runs
               </label>
+              {editing.is_active === false && (
+                <div style={{ fontSize: '0.8rem', color: '#92400e', marginTop: 4 }}>
+                  This staff account is deactivated, so they are left out of payroll runs regardless of this setting.
+                  Reactivate the account in User Management if they are still employed.
+                </div>
+              )}
             </div>
 
             {saveError && <div className="error-message" style={{ marginBottom: '1rem' }}>{saveError}</div>}

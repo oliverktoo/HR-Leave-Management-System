@@ -1,9 +1,9 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '../../lib/supabaseClient';
 import {
-  getPayrollRuns,
+  getMyPayslipRuns,
   getPayrollLines,
-  PayrollRun,
+  MyPayslipRun,
   PayrollLine,
   formatKES,
   monthName,
@@ -17,9 +17,9 @@ export function MyPayslips() {
   const now = new Date();
   const [year, setYear]       = useState(now.getFullYear());
   const [userId, setUserId]   = useState('');
-  const [runs, setRuns]       = useState<PayrollRun[]>([]);
-  const [allRuns, setAllRuns] = useState<PayrollRun[]>([]);
-  const [selected, setSelected] = useState<PayrollRun | null>(null);
+  const [runs, setRuns]       = useState<MyPayslipRun[]>([]);
+  const [allRuns, setAllRuns] = useState<MyPayslipRun[]>([]);
+  const [selected, setSelected] = useState<MyPayslipRun | null>(null);
   const [line, setLine]       = useState<PayrollLine | null>(null);
   const [loading, setLoading] = useState(true);
   const [lineLoading, setLineLoading] = useState(false);
@@ -31,11 +31,9 @@ export function MyPayslips() {
     supabase.auth.getUser().then(({ data: { user } }) => {
       if (user) setUserId(user.id);
     });
-    getPayrollRuns()
-      .then(all => {
-        const finished = all.filter(r => r.status === 'approved' || r.status === 'paid');
-        setAllRuns(finished);
-      })
+    // Only runs whose payslips HR has released (also enforced in the database)
+    getMyPayslipRuns()
+      .then(setAllRuns)
       .catch(e => setError(e.message))
       .finally(() => setLoading(false));
   }, []);
@@ -46,7 +44,7 @@ export function MyPayslips() {
     setLine(null);
   }, [allRuns, year]);
 
-  async function loadPayslip(run: PayrollRun) {
+  async function loadPayslip(run: MyPayslipRun) {
     setSelected(run);
     setLine(null);
     setLineLoading(true);
@@ -92,7 +90,7 @@ export function MyPayslips() {
       {allRuns.length === 0 ? (
         <div className="card">
           <div className="empty-state" style={{ padding: '3rem' }}>
-            <p>No approved payslips available yet.</p>
+            <p>No payslips have been released to you yet.</p>
           </div>
         </div>
       ) : (
@@ -171,7 +169,7 @@ export function MyPayslips() {
   );
 }
 
-function Payslip({ run, line }: { run: PayrollRun; line: PayrollLine }) {
+function Payslip({ run, line }: { run: MyPayslipRun; line: PayrollLine }) {
   const allowances = Object.entries(line.allowances || {});
   const otherDeductions = (line.other_deductions || []) as Array<{ name: string; amount: number }>;
   const hadAbsence = line.leave_days > 0 || line.ooo_days > 0;

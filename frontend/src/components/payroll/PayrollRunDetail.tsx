@@ -10,6 +10,7 @@ import {
   createRevision,
   saveVariablePayForLine,
   generateBankFile,
+  setPayslipsReleased,
   downloadCSV,
   openPayslip,
   PayrollRun,
@@ -364,6 +365,20 @@ export function PayrollRunDetail() {
     navigate(`/payroll/runs/${newRun.id}`);
   }
 
+  async function handleSetPayslipsReleased(release: boolean) {
+    if (!id || !run) return;
+    const period = `${monthName(run.pay_period_month)} ${run.pay_period_year}`;
+    const ok = window.confirm(release
+      ? `Release ${period} payslips? Every employee on this run will be able to view their payslip and will get a notification.`
+      : `Withdraw ${period} payslips? Employees will no longer be able to view them until you release again.`);
+    if (!ok) return;
+    setActionLoading(true);
+    setError('');
+    try { setRun(await setPayslipsReleased(id, release)); }
+    catch (e: unknown) { setError(e instanceof Error ? e.message : String(e)); }
+    finally { setActionLoading(false); }
+  }
+
   function handleDownloadBankFile() {
     if (!run) return;
     const csv = generateBankFile(lines, `${monthName(run.pay_period_month)} ${run.pay_period_year}`);
@@ -382,6 +397,9 @@ export function PayrollRunDetail() {
   const canAct  = role === 'hr_admin' || role === 'super_admin' || role === 'finance' || role === 'ceo';
   const isDraft = run.status === 'draft';
   const isApprovedOrPaid = ['approved', 'paid'].includes(run.status);
+  const isHrAdmin = ['hr_admin', 'super_admin'].includes(role) ||
+    ['hr_admin', 'super_admin'].includes((profile as { secondary_role?: string } | null)?.secondary_role ?? '');
+  const payslipsReleasedAt = run.payslips_distributed_at ? new Date(run.payslips_distributed_at) : null;
 
   const filtered = lines.filter(l => {
     if (!search) return true;
@@ -463,6 +481,33 @@ export function PayrollRunDetail() {
         </div>
 
         {error && <div className="error-message" style={{ marginBottom: '1rem' }}>{error}</div>}
+
+        {/* ── Payslip release (approved / paid) ── */}
+        {isApprovedOrPaid && (
+          <div style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '1rem', flexWrap: 'wrap',
+            background: payslipsReleasedAt ? '#ecfdf5' : '#fffbeb',
+            border: `1px solid ${payslipsReleasedAt ? '#a7f3d0' : '#fde68a'}`,
+            borderRadius: 8, padding: '0.75rem 1rem', marginBottom: '1.25rem', fontSize: '0.875rem',
+          }}>
+            <div style={{ color: payslipsReleasedAt ? '#065f46' : '#92400e' }}>
+              {payslipsReleasedAt
+                ? <><strong>Payslips released</strong> on {payslipsReleasedAt.toLocaleString('en-KE', { dateStyle: 'medium', timeStyle: 'short' })} — staff can view them under My Payslips.</>
+                : <><strong>Payslips not yet released</strong> — staff cannot see this month's payslips until you release them.</>}
+            </div>
+            {isHrAdmin && (
+              payslipsReleasedAt ? (
+                <button className="btn btn-sm btn-outline" onClick={() => handleSetPayslipsReleased(false)} disabled={actionLoading}>
+                  Withdraw payslips
+                </button>
+              ) : (
+                <button className="btn btn-sm btn-primary" onClick={() => handleSetPayslipsReleased(true)} disabled={actionLoading}>
+                  📨 Release payslips to staff
+                </button>
+              )
+            )}
+          </div>
+        )}
 
         {/* ── Totals summary ── */}
         <div className="stats-grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(140px,1fr))', gap: '0.75rem', marginBottom: '1.5rem' }}>

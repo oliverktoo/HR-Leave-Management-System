@@ -37,6 +37,7 @@ export interface EmployeePayrollProfile {
   allowances: Record<string, number>;
   salary_grade: string | null;
   payroll_active: boolean;
+  is_active?: boolean;   // staff account active (login); separate from payroll_active
   // Non-statutory deductions (SOP 6.4)
   sacco_contribution: number;
   sacco_loan_repayment: number;
@@ -164,9 +165,16 @@ export interface PayrollRun {
   revision_of: string | null;
   revision_notes: string | null;
   revision_number: number;
+  // Payslip release (migration 076): staff can see payslips only once set
+  payslips_distributed_at: string | null;
+  payslips_released_by: string | null;
   created_at: string;
   updated_at: string;
 }
+
+/** A payslip period visible to the signed-in employee (no company totals). */
+export type MyPayslipRun = Pick<PayrollRun,
+  'id' | 'pay_period_year' | 'pay_period_month' | 'status' | 'working_days_in_period' | 'payslips_distributed_at'>;
 
 export interface PayrollLine {
   id: string;
@@ -826,19 +834,36 @@ export async function advancePayrollRunStatus(
 
 // ─── Employee payroll profile ─────────────────────────────────────────────────
 
-export async function getEmployeePayrollProfiles(): Promise<EmployeePayrollProfile[]> {
-  const { data, error } = await supabase
+export async function getEmployeePayrollProfiles(includeInactive = false): Promise<EmployeePayrollProfile[]> {
+  let query = supabase
     .from('users_profile')
     .select(
-      'id, employee_id, first_name, last_name, department_id, job_title, ' +
+      'id, employee_id, first_name, last_name, department_id, job_title, is_active, ' +
       'kra_pin, nssf_number, sha_number, helb_account, helb_monthly_amount, ' +
       'bank_name, bank_branch, bank_account_number, employment_type, ' +
       'basic_salary, allowances, salary_grade, payroll_active'
     )
-    .eq('is_active', true)
     .order('employee_id', { ascending: true });
+  if (!includeInactive) query = query.eq('is_active', true);
+  const { data, error } = await query;
   if (error) throw error;
   return (data as unknown as EmployeePayrollProfile[]) || [];
+}
+
+// ─── Payslip release (migration 076) ─────────────────────────────────────────
+
+/** HR admin / super admin: release (true) or withdraw (false) a run's payslips. */
+export async function setPayslipsReleased(runId: string, release: boolean): Promise<PayrollRun> {
+  const { data, error } = await supabase.rpc('set_payslips_released', { p_run_id: runId, p_release: release });
+  if (error) throw error;
+  return data as PayrollRun;
+}
+
+/** The signed-in employee's released payslip periods, newest first. */
+export async function getMyPayslipRuns(): Promise<MyPayslipRun[]> {
+  const { data, error } = await supabase.rpc('my_payslip_runs');
+  if (error) throw error;
+  return (data as MyPayslipRun[]) || [];
 }
 
 export async function updateEmployeePayrollProfile(

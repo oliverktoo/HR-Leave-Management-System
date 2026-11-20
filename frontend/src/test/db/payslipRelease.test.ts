@@ -1,0 +1,107 @@
+// 076_payslip_release.sql: staff see their own payslip only after HR releases it.
+import { beforeAll, describe, expect, test } from 'vitest';
+import type { PGlite } from '@electric-sql/pglite';
+import { addUser, asUser, createLeaveDb } from './leaveDb';
+
+let db: PGlite;
+let hr: string, emp1: string, emp2: string, finance: string;
+let approvedRun: string, draftRun: string;
+
+async function run(month: number, status: string) {
+  const { rows } = await db.query<{ id: string }>(
+    `INSERT INTO payroll_runs (pay_period_year, pay_period_month, status, total_gross) VALUES (2026, $1, $2, 999999) RETURNING id`,
+    [month, status]);
+  return rows[0].id;
+}
+const line = (runId: string, userId: string, net: number) =>
+  db.query(`INSERT INTO payroll_lines (run_id, user_id, gross_pay, net_pay) VALUES ($1, $2, $3, $3)`, [runId, userId, net]);
+
+const ownLines = (uid: string) => asUser(db, uid, (tx) =>
+  tx.query<{ run_id: string; user_id: string }>(`SELECT run_id, user_id FROM payroll_lines`)).then(r => r.rows);
+const myRuns = (uid: string) => asUser(db, uid, (tx) =>
+  tx.query<Record<string, unknown>>(`SELECT * FROM my_payslip_runs()`)).then(r => r.rows);
+const release = (uid: string, runId: string, on: boolean) => asUser(db, uid, (tx) =>
+  tx.query(`SELECT * FROM set_payslips_released($1, $2)`, [runId, on]));
+
+beforeAll(async () => {
+  db = await createLeaveDb(['021_ooo_requests.sql', '030_payroll_foundation.sql', '031_payroll_approval_roles.sql',
+    '032_payroll_leave_integration.sql', '057_payroll_sop_compliance.sql', '058_payroll_gap_fixes.sql',
+    '076_payslip_release.sql']);
+  hr = await addUser(db, 'hr_admin');
+  emp1 = await addUser(db, 'employee');
+  emp2 = await addUser(db, 'employee');
+  finance = await addUser(db, 'finance');
+  approvedRun = await run(7, 'approved');
+  draftRun = await run(8, 'draft');
+  await line(approvedRun, emp1, 50_000);
+  await line(approvedRun, emp2, 60_000);
+  await line(draftRun, emp1, 51_000);
+}, 60_000);
+
+describe('before release', () => {
+  test('staff cannot see their payslip or the run', async () => {
+    expect(await ownLines(emp1)).toEqual([]);
+    expect(await myRuns(emp1)).toEqual([]);
+  });
+
+  test('staff never get read access to payroll runs (company totals)', async () => {
+    const { rows } = await asUser(db, emp1, (tx) => tx.query(`SELECT * FROM payroll_runs`));
+    expect(rows).toEqual([]);
+  });
+
+  test('only HR admin / super admin can release', async () => {
+    await expect(release(emp1, approvedRun, true)).rejects.toThrow(/Only HR admin/);
+    await expect(release(finance, approvedRun, true)).rejects.toThrow(/Only HR admin/);
+  });
+
+  test('a draft run cannot be released', async () => {
+    await expect(release(hr, draftRun, true)).rejects.toThrow(/approved or paid/);
+  });
+});
+
+describe('after release', () => {
+  beforeAll(async () => { await release(hr, approvedRun, true); });
+
+  test('staff see their own payslip line, not colleagues\'', async () => {
+    expect(await ownLines(emp1)).toEqual([{ run_id: approvedRun, user_id: emp1 }]);
+  });
+
+  test('draft runs stay hidden', async () => {
+    expect((await ownLines(emp1)).some(l => l.run_id === draftRun)).toBe(false);
+  });
+
+  test('my_payslip_runs lists the period without company totals', async () => {
+    const runs = await myRuns(emp1);
+    expect(runs).toHaveLength(1);
+    expect(runs[0]).toMatchObject({ id: approvedRun, pay_period_year: 2026, pay_period_month: 7, status: 'approved' });
+    expect(runs[0]).not.toHaveProperty('total_gross');
+  });
+
+  test('everyone on the run is notified once', async () => {
+    const { rows } = await db.query<{ user_id: string; message: string }>(
+      `SELECT user_id, message FROM notifications WHERE type = 'payslip' ORDER BY user_id`);
+    expect(rows.map(r => r.user_id).sort()).toEqual([emp1, emp2].sort());
+    expect(rows[0].message).toMatch(/July 2026/);
+  });
+
+  test('release and withdraw are audited', async () => {
+    const { rows } = await db.query<{ action: string; actor_id: string }>(
+      `SELECT action, actor_id FROM payroll_audit_log WHERE run_id = $1`, [approvedRun]);
+    expect(rows).toContainEqual({ action: 'payslips_released', actor_id: hr });
+  });
+});
+
+describe('withdraw', () => {
+  test('hides the payslip again', async () => {
+    await release(hr, approvedRun, false);
+    expect(await ownLines(emp1)).toEqual([]);
+    expect(await myRuns(emp1)).toEqual([]);
+  });
+
+  test('releasing again does not notify staff a second time', async () => {
+    await release(hr, approvedRun, true);
+    const { rows } = await db.query<{ n: number }>(`SELECT count(*)::int n FROM notifications WHERE type = 'payslip'`);
+    expect(rows[0].n).toBe(2);
+    expect(await ownLines(emp2)).toEqual([{ run_id: approvedRun, user_id: emp2 }]);
+  });
+});
