@@ -67,3 +67,6 @@ BU/
 
 # Supabase CLI cache
 supabase/.temp/
+
+# Payroll source files (salaries, bank details) — never commit
+payroll-imports/
