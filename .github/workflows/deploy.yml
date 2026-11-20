@@ -5,6 +5,8 @@ on:
     branches: [main, develop]
   pull_request:
     branches: [main]
+  # Production deploys are manual: GitHub → Actions → CI/CD Pipeline → Run workflow
+  workflow_dispatch:
 
 jobs:
   test:
@@ -38,7 +40,7 @@ jobs:
   deploy:
     needs: test
     runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    if: github.ref == 'refs/heads/main' && github.event_name == 'workflow_dispatch'
     
     steps:
       - uses: actions/checkout@v3
