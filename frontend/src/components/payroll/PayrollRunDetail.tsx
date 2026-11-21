@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, type CSSProperties } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
   getPayrollRunById,
@@ -279,6 +279,9 @@ function RevisionModal({ onConfirm, onClose }: RevisionModalProps) {
 
 // ─── Main component ────────────────────────────────────────────────────────────
 
+/** Money columns: right-aligned, fixed-width digits so amounts line up. */
+const NUM_CELL: CSSProperties = { textAlign: 'right', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' };
+
 export function PayrollRunDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -510,19 +513,34 @@ export function PayrollRunDetail() {
         )}
 
         {/* ── Totals summary ── */}
-        <div className="stats-grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(140px,1fr))', gap: '0.75rem', marginBottom: '1.5rem' }}>
+        {/* Own layout (not the shared .stat-card, which lays label and value side by side) */}
+        <div style={{
+          display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))',
+          gap: '0.75rem', marginBottom: '1.5rem',
+        }}>
           {[
-            { label: 'Employees',    value: lines.length,                                              mono: false },
-            { label: 'Gross Pay',    value: run.total_gross              ? formatKES(run.total_gross)              : '—', mono: true },
-            { label: 'PAYE',         value: run.total_paye               ? formatKES(run.total_paye)               : '—', mono: true },
-            { label: 'NSSF (Emp)',   value: run.total_nssf_employee      ? formatKES(run.total_nssf_employee)      : '—', mono: true },
-            { label: 'SHA/SHIF',     value: run.total_sha                ? formatKES(run.total_sha)                : '—', mono: true },
-            { label: 'Housing Levy', value: run.total_housing_levy_employee ? formatKES(run.total_housing_levy_employee) : '—', mono: true },
-            { label: 'Net Pay',      value: run.total_net                ? formatKES(run.total_net)                : '—', mono: true },
+            { label: 'Employees',          value: String(lines.length) },
+            { label: 'Gross pay',          value: run.total_gross                 ? formatKES(run.total_gross)                 : '—' },
+            { label: 'PAYE',               value: run.total_paye                  ? formatKES(run.total_paye)                  : '—' },
+            { label: 'NSSF (employee)',    value: run.total_nssf_employee         ? formatKES(run.total_nssf_employee)         : '—' },
+            { label: 'SHA / SHIF',         value: run.total_sha                   ? formatKES(run.total_sha)                   : '—' },
+            { label: 'Housing Levy',       value: run.total_housing_levy_employee ? formatKES(run.total_housing_levy_employee) : '—' },
+            { label: 'Net pay',            value: run.total_net                   ? formatKES(run.total_net)                   : '—', strong: true },
           ].map(s => (
-            <div key={s.label} className="stat-card" style={{ padding: '0.75rem' }}>
-              <div className="stat-label" style={{ fontSize: '0.75rem' }}>{s.label}</div>
-              <div className="stat-value" style={{ fontSize: s.mono ? '1rem' : '1.5rem' }}>{s.value}</div>
+            <div key={s.label} style={{
+              background: s.strong ? '#ecfdf5' : '#fff',
+              border: `1px solid ${s.strong ? '#a7f3d0' : '#e5e7eb'}`,
+              borderRadius: 10, padding: '0.85rem 1rem', minWidth: 0,
+            }}>
+              <div style={{ fontSize: '0.72rem', fontWeight: 600, letterSpacing: '0.04em', textTransform: 'uppercase', color: s.strong ? '#047857' : '#64748b' }}>
+                {s.label}
+              </div>
+              <div style={{
+                marginTop: 4, fontSize: '1.15rem', fontWeight: 700, color: s.strong ? '#065f46' : '#0f172a',
+                fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+              }} title={s.value}>
+                {s.value}
+              </div>
             </div>
           ))}
         </div>
@@ -547,14 +565,14 @@ export function PayrollRunDetail() {
               <thead>
                 <tr>
                   <th>Employee</th>
-                  <th>Basic</th>
-                  {hasVariablePay && <th>Variable</th>}
-                  <th>Gross</th>
-                  <th>NSSF</th>
-                  <th>SHA</th>
-                  <th>Housing</th>
-                  <th>PAYE</th>
-                  <th>Net Pay</th>
+                  <th style={NUM_CELL}>Basic</th>
+                  {hasVariablePay && <th style={NUM_CELL}>Variable</th>}
+                  <th style={NUM_CELL}>Gross</th>
+                  <th style={NUM_CELL}>NSSF</th>
+                  <th style={NUM_CELL}>SHA</th>
+                  <th style={NUM_CELL}>Housing</th>
+                  <th style={NUM_CELL}>PAYE</th>
+                  <th style={NUM_CELL}>Net Pay</th>
                   <th></th>
                 </tr>
               </thead>
@@ -580,18 +598,18 @@ export function PayrollRunDetail() {
                           </div>
                         )}
                       </td>
-                      <td>{formatKES(line.basic_salary)}</td>
+                      <td style={NUM_CELL}>{formatKES(line.basic_salary)}</td>
                       {hasVariablePay && (
-                        <td style={{ color: variableTotal > 0 ? '#059669' : '#94a3b8', fontSize: '0.85rem' }}>
+                        <td style={{ ...NUM_CELL, color: variableTotal > 0 ? '#059669' : '#94a3b8', fontSize: '0.85rem' }}>
                           {variableTotal > 0 ? `+${formatKES(variableTotal)}` : '—'}
                         </td>
                       )}
-                      <td>{formatKES(line.gross_pay)}</td>
-                      <td>{formatKES(line.nssf_tier1 + line.nssf_tier2)}</td>
-                      <td>{formatKES(line.sha_amount)}</td>
-                      <td>{formatKES(line.housing_levy_employee)}</td>
-                      <td>{formatKES(line.paye_amount)}</td>
-                      <td><strong>{formatKES(line.net_pay)}</strong></td>
+                      <td style={NUM_CELL}>{formatKES(line.gross_pay)}</td>
+                      <td style={NUM_CELL}>{formatKES(line.nssf_tier1 + line.nssf_tier2)}</td>
+                      <td style={NUM_CELL}>{formatKES(line.sha_amount)}</td>
+                      <td style={NUM_CELL}>{formatKES(line.housing_levy_employee)}</td>
+                      <td style={NUM_CELL}>{formatKES(line.paye_amount)}</td>
+                      <td style={NUM_CELL}><strong>{formatKES(line.net_pay)}</strong></td>
                       <td>
                         <div style={{ display: 'flex', gap: '0.4rem' }}>
                           {isDraft && (
