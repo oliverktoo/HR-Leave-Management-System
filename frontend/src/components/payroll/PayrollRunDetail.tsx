@@ -515,7 +515,8 @@ export function PayrollRunDetail() {
         {/* ── Totals summary ── */}
         {/* Own layout (not the shared .stat-card, which lays label and value side by side) */}
         <div style={{
-          display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))',
+          // wide enough for "Ksh 99,999,999.00" — cards wrap to a new row rather than cut amounts
+          display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(215px, 1fr))',
           gap: '0.75rem', marginBottom: '1.5rem',
         }}>
           {[
@@ -537,8 +538,8 @@ export function PayrollRunDetail() {
               </div>
               <div style={{
                 marginTop: 4, fontSize: '1.15rem', fontWeight: 700, color: s.strong ? '#065f46' : '#0f172a',
-                fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
-              }} title={s.value}>
+                fontVariantNumeric: 'tabular-nums', overflowWrap: 'anywhere',
+              }}>
                 {s.value}
               </div>
             </div>
