@@ -67,6 +67,7 @@ function VariablePayModal({ line, onSave, onClose }: VarPayModalProps) {
   const [bonus,          setBonus]          = useState(line.bonus_amount    || 0);
   const [acting,         setActing]         = useState(line.acting_allowance || 0);
   const [perDiem,        setPerDiem]        = useState(line.per_diem_amount || 0);
+  const [perDiemDays,    setPerDiemDays]    = useState(line.per_diem_days   || 0);
   const [bik,            setBik]            = useState(line.benefits_in_kind || 0);
   const [courtAmount,    setCourtAmount]    = useState(line.court_deduction_amount || 0);
   const [courtRef,       setCourtRef]       = useState(line.court_deduction_ref   || '');
@@ -85,6 +86,7 @@ function VariablePayModal({ line, onSave, onClose }: VarPayModalProps) {
         bonus_amount:         bonus,
         acting_allowance:     acting,
         per_diem_amount:      perDiem,
+        per_diem_days:        perDiemDays,
         benefits_in_kind:     bik,
         court_deduction_amount: courtAmount,
         court_deduction_ref:  courtRef,
@@ -133,12 +135,23 @@ function VariablePayModal({ line, onSave, onClose }: VarPayModalProps) {
               value={perDiem} onChange={e => setPerDiem(Number(e.target.value))} />
           </div>
           <div className="form-group">
+            <label className="form-label">Days on official duty away</label>
+            <input type="number" className="form-control" min={0} step={0.5}
+              value={perDiemDays} onChange={e => setPerDiemDays(Number(e.target.value))}
+              title="Days away from the usual place of work on official duty. Per diem up to the daily limit × these days is tax-free." />
+          </div>
+          <div className="form-group" style={{ gridColumn: '1 / -1' }}>
             <label className="form-label">Benefits in Kind (KES)</label>
             <input type="number" className="form-control" min={0}
               value={bik} onChange={e => setBik(Number(e.target.value))}
-              title="Non-cash taxable benefits (company car, housing, etc.). Added to chargeable income for PAYE." />
+              title="Non-cash benefits (company car, housing, etc.). Tax-free when within the annual exemption; otherwise added to taxable income." />
           </div>
         </div>
+        {perDiem > 0 && perDiemDays === 0 && (
+          <div style={{ fontSize: '0.8rem', color: '#b45309', marginTop: 4 }}>
+            No travel days entered — the whole per diem will be taxed as pay. Enter the days away on official duty for the tax-free part to apply.
+          </div>
+        )}
 
         <div style={{ borderTop: '1px solid #e2e8f0', marginTop: '0.75rem', paddingTop: '0.75rem' }}>
           <p style={{ fontSize: '0.8rem', color: '#64748b', marginBottom: '0.5rem' }}>Court-ordered deduction (if any)</p>

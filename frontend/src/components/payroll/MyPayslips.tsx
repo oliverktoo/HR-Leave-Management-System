@@ -3,6 +3,7 @@ import { supabase } from '../../lib/supabaseClient';
 import {
   getMyPayslipRuns,
   getPayrollLines,
+  openPayslip,
   MyPayslipRun,
   PayrollLine,
   formatKES,
@@ -152,9 +153,10 @@ export function MyPayslips() {
                     </h3>
                     <button
                       className="btn btn-sm btn-outline"
-                      onClick={() => window.print()}
+                      onClick={() => openPayslip(line, selected)}
+                      title="Opens the official payslip in a new tab — print it or save as PDF from there"
                     >
-                      🖨 Print
+                      🖨 Print / save payslip
                     </button>
                   </div>
                   <Payslip run={selected} line={line} />
@@ -173,6 +175,32 @@ function Payslip({ run, line }: { run: MyPayslipRun; line: PayrollLine }) {
   const allowances = Object.entries(line.allowances || {});
   const otherDeductions = (line.other_deductions || []) as Array<{ name: string; amount: number }>;
   const hadAbsence = line.leave_days > 0 || line.ooo_days > 0;
+  const otherVariable = (line.other_variable_pay || []) as Array<{ name: string; amount: number }>;
+  const variablePay = [
+    { label: `Overtime${line.overtime_hours ? ` (${line.overtime_hours} hrs)` : ''}`, amount: line.overtime_amount || 0 },
+    { label: 'Bonus', amount: line.bonus_amount || 0 },
+    { label: 'Acting Allowance', amount: line.acting_allowance || 0 },
+    { label: (line.per_diem_exempt || 0) > 0
+        ? `Per Diem (${formatKES(line.per_diem_exempt || 0)} tax-free)` : 'Per Diem', amount: line.per_diem_amount || 0 },
+    ...otherVariable.map(v => ({ label: v.name, amount: v.amount })),
+  ].filter(v => v.amount > 0);
+  const variableTotal = variablePay.reduce((s, v) => s + v.amount, 0);
+  const fixedPay = line.basic_salary + Object.values(line.allowances || {}).reduce((s, v) => s + Number(v), 0);
+  const absenceDeduction = Math.max(0, fixedPay - (line.gross_pay - variableTotal));
+  const otherPayrollDeductions = [
+    { label: 'SACCO Contribution', amount: line.sacco_contribution || 0 },
+    { label: 'SACCO Loan Repayment', amount: line.sacco_loan_repayment || 0 },
+    { label: 'Medical Insurance', amount: line.medical_premium || 0 },
+    { label: 'Supplementary Pension', amount: line.supplementary_pension || 0 },
+    { label: 'Salary Advance Recovery', amount: line.salary_advance_recovery || 0 },
+    { label: `Court Order${line.court_deduction_ref ? ` (${line.court_deduction_ref})` : ''}`, amount: line.court_deduction_amount || 0 },
+  ].filter(d => d.amount > 0);
+  const taxAdjustments = [
+    { label: 'Pension (tax deduction)', amount: line.pension_deduction || 0 },
+    { label: 'Mortgage interest (tax deduction)', amount: line.mortgage_interest_deduction || 0 },
+    { label: 'Post-retirement medical fund (tax deduction)', amount: line.prmf_deduction || 0 },
+    { label: 'Disability exemption', amount: line.disability_exemption || 0 },
+  ].filter(t => t.amount > 0);
 
   return (
     <div className="payslip-body">
@@ -210,15 +238,10 @@ function Payslip({ run, line }: { run: MyPayslipRun; line: PayrollLine }) {
         {allowances.map(([name, amt]) => (
           <Row key={name} label={capitalize(name)} value={formatKES(amt as number)} />
         ))}
-        {hadAbsence && (
-          <Row
-            label="Unpaid Absence Deduction"
-            value={`(${formatKES(
-              (line.basic_salary + Object.values(line.allowances || {}).reduce((s, v) => s + Number(v), 0)) - line.gross_pay
-            )})`}
-            muted
-          />
+        {absenceDeduction > 0 && (
+          <Row label="Unpaid Absence Deduction" value={`(${formatKES(absenceDeduction)})`} muted />
         )}
+        {variablePay.map(v => <Row key={v.label} label={v.label} value={formatKES(v.amount)} />)}
         <RowBold label="GROSS PAY" value={formatKES(line.gross_pay)} />
       </Section>
 
@@ -228,11 +251,15 @@ function Payslip({ run, line }: { run: MyPayslipRun; line: PayrollLine }) {
         <Row label="NSSF Tier II"             value={`(${formatKES(line.nssf_tier2)})`} />
         <Row label="SHA / SHIF"               value={`(${formatKES(line.sha_amount)})`} />
         <Row label="Housing Levy"             value={`(${formatKES(line.housing_levy_employee)})`} />
+        {taxAdjustments.map(t => <Row key={t.label} label={t.label} value={formatKES(t.amount)} muted />)}
         <Row label="Taxable Income"           value={formatKES(line.taxable_income)} />
-        <Row label="PAYE (before relief)"     value={`(${formatKES(line.paye_before_relief)})`} />
-        <Row label="Personal Relief"          value={`+${formatKES(line.personal_relief)}`} />
+        <Row label={line.tax_basis === 'secondary' ? 'PAYE (secondary-employment rate)' : 'PAYE (before relief)'}
+             value={`(${formatKES(line.paye_before_relief)})`} />
+        {line.personal_relief > 0 && <Row label="Personal Relief" value={`+${formatKES(line.personal_relief)}`} />}
+        {(line.insurance_relief || 0) > 0 && <Row label="Insurance Relief" value={`+${formatKES(line.insurance_relief)}`} />}
         <Row label="PAYE"                     value={`(${formatKES(line.paye_amount)})`} />
         {line.helb_amount > 0 && <Row label="HELB" value={`(${formatKES(line.helb_amount)})`} />}
+        {otherPayrollDeductions.map(d => <Row key={d.label} label={d.label} value={`(${formatKES(d.amount)})`} />)}
         {otherDeductions.map(d => (
           <Row key={d.name} label={d.name} value={`(${formatKES(d.amount)})`} />
         ))}

@@ -26,7 +26,7 @@ const release = (uid: string, runId: string, on: boolean) => asUser(db, uid, (tx
 beforeAll(async () => {
   db = await createLeaveDb(['021_ooo_requests.sql', '030_payroll_foundation.sql', '031_payroll_approval_roles.sql',
     '032_payroll_leave_integration.sql', '057_payroll_sop_compliance.sql', '058_payroll_gap_fixes.sql',
-    '076_payslip_release.sql']);
+    '076_payslip_release.sql', '077_payroll_special_cases.sql']);
   hr = await addUser(db, 'hr_admin');
   emp1 = await addUser(db, 'employee');
   emp2 = await addUser(db, 'employee');
@@ -103,5 +103,32 @@ describe('withdraw', () => {
     const { rows } = await db.query<{ n: number }>(`SELECT count(*)::int n FROM notifications WHERE type = 'payslip'`);
     expect(rows[0].n).toBe(2);
     expect(await ownLines(emp2)).toEqual([{ run_id: approvedRun, user_id: emp2 }]);
+  });
+});
+
+describe('077 special cases schema', () => {
+  test('statutory limits are seeded as payroll settings', async () => {
+    const { rows } = await db.query<{ setting_key: string; v: string }>(
+      `SELECT setting_key, setting_value::text v FROM payroll_settings
+        WHERE setting_key IN ('per_diem_daily_exempt','bik_annual_exempt','disability_exemption_monthly','secondary_employment_rate')
+        ORDER BY 1`);
+    expect(rows).toEqual([
+      { setting_key: 'bik_annual_exempt', v: '60000' },
+      { setting_key: 'disability_exemption_monthly', v: '150000' },
+      { setting_key: 'per_diem_daily_exempt', v: '10000' },
+      { setting_key: 'secondary_employment_rate', v: '0.35' },
+    ]);
+  });
+
+  test('profiles default to resident / primary and reject other values', async () => {
+    const { rows } = await db.query(`SELECT tax_residency, tax_employment_category FROM users_profile WHERE id = $1`, [emp1]);
+    expect(rows[0]).toEqual({ tax_residency: 'resident', tax_employment_category: 'primary' });
+    await expect(db.query(`UPDATE users_profile SET tax_residency = 'mars' WHERE id = $1`, [emp1])).rejects.toThrow(/chk_tax_residency/);
+  });
+
+  test('employees cannot change their own tax status', async () => {
+    await expect(asUser(db, emp1, (tx) =>
+      tx.query(`UPDATE users_profile SET disability_exemption_cert_no = 'FAKE' WHERE id = $1`, [emp1])))
+      .rejects.toThrow(/disability_exemption_cert_no/);
   });
 });

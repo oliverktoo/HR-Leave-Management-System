@@ -15,6 +15,8 @@ export interface PayrollSettings {
   sha_minimum: number;
   housing_levy_employee_rate: number;
   housing_levy_employer_rate: number;
+  /** Statutory thresholds (migration 077); missing keys fall back to TAX_LIMIT_DEFAULTS. */
+  limits?: Partial<Record<string, number>>;
 }
 
 export interface EmployeePayrollProfile {
@@ -38,6 +40,13 @@ export interface EmployeePayrollProfile {
   salary_grade: string | null;
   payroll_active: boolean;
   is_active?: boolean;   // staff account active (login); separate from payroll_active
+  // Tax circumstances (migration 077)
+  tax_residency?: 'resident' | 'non_resident' | null;
+  tax_employment_category?: 'primary' | 'secondary' | null;
+  disability_exemption_cert_no?: string | null;
+  disability_exemption_expiry?: string | null;
+  mortgage_interest_monthly?: number | null;
+  post_retirement_medical_monthly?: number | null;
   // Non-statutory deductions (SOP 6.4)
   sacco_contribution: number;
   sacco_loan_repayment: number;
@@ -54,6 +63,7 @@ export interface VariablePayInput {
   bonus_amount: number;
   acting_allowance: number;
   per_diem_amount: number;
+  per_diem_days: number;       // days away on official duty (tax-free per diem = days × daily limit)
   benefits_in_kind: number;    // non-cash taxable benefits (company car, housing, etc.)
   court_deduction_amount: number;
   court_deduction_ref: string;
@@ -104,13 +114,21 @@ export interface ComputedPayrollLine {
   bonus_amount: number;
   acting_allowance: number;
   per_diem_amount: number;
+  per_diem_days: number;
+  per_diem_exempt: number;        // tax-free part (days × daily limit)
   other_variable_pay: Array<{ name: string; amount: number }>;
-  benefits_in_kind: number;       // non-cash BIK (added to taxable income, not cash gross)
+  benefits_in_kind: number;       // non-cash BIK (not cash gross)
+  bik_taxable: number;            // BIK added to taxable income (0 when within the annual exemption)
   gross_pay: number;
   nssf_tier1: number;
   nssf_tier2: number;
   sha_amount: number;
   housing_levy_employee: number;
+  pension_deduction: number;
+  mortgage_interest_deduction: number;
+  prmf_deduction: number;
+  disability_exemption: number;
+  tax_basis: 'resident' | 'non_resident' | 'secondary';
   taxable_income: number;
   paye_before_relief: number;
   personal_relief: number;
@@ -191,6 +209,15 @@ export interface PayrollLine {
   per_diem_amount: number;
   other_variable_pay: Array<{ name: string; amount: number }>;
   benefits_in_kind: number;
+  // Special-case tax detail (migration 077); absent on lines computed before it
+  per_diem_days?: number;
+  per_diem_exempt?: number;
+  bik_taxable?: number;
+  pension_deduction?: number;
+  mortgage_interest_deduction?: number;
+  prmf_deduction?: number;
+  disability_exemption?: number;
+  tax_basis?: 'resident' | 'non_resident' | 'secondary' | null;
   gross_pay: number;
   nssf_tier1: number;
   nssf_tier2: number;
@@ -271,6 +298,11 @@ export async function getPayrollSettings(): Promise<PayrollSettings> {
     sha_minimum:                  Number(map.sha_minimum),
     housing_levy_employee_rate:   Number(map.housing_levy_employee_rate),
     housing_levy_employer_rate:   Number(map.housing_levy_employer_rate),
+    limits: Object.fromEntries(
+      Object.keys(TAX_LIMIT_DEFAULTS)
+        .filter(k => map[k] !== undefined && map[k] !== null)
+        .map(k => [k, Number(map[k])])
+    ),
   };
   return _settingsCache;
 }
@@ -350,8 +382,68 @@ export function computeHousingLevy(
   };
 }
 
-/** Max monthly pension contribution (incl. NSSF) deductible for PAYE — ITA as amended Dec 2024. */
-export const PENSION_DEDUCTION_CAP_MONTHLY = 30_000;
+// ─── Statutory limits (Kenya) ────────────────────────────────────────────────
+// Every legal threshold is a payroll setting (payroll_settings, migration 077),
+// so payroll can follow a change in the law without a code change. These are
+// the defaults used when a setting is missing.
+export const TAX_LIMIT_DEFAULTS = {
+  /** ITA s.5(2)(a): tax-free per diem per day away from usual place of work (Finance Act 2025). */
+  per_diem_daily_exempt: 10_000,
+  /** Non-cash benefits tax-free when their aggregate value is ≤ this per year (Tax Laws (Amendment) Act 2024). */
+  bik_annual_exempt: 60_000,
+  /** Registered pension contributions (incl. NSSF) deductible per month (TLAA 2024). */
+  pension_deduction_cap_monthly: 30_000,
+  /** Owner-occupier mortgage interest deductible per month (KES 360,000/yr, TLAA 2024). */
+  mortgage_interest_cap_monthly: 30_000,
+  /** Post-retirement medical fund contributions deductible per month (TLAA 2024, KRA notice 2157). */
+  prmf_cap_monthly: 15_000,
+  /** Persons with disability: income exempt per month with a valid KRA exemption certificate. */
+  disability_exemption_monthly: 150_000,
+  /** Secondary employment: PAYE at the highest rate on the whole taxable pay, no reliefs. */
+  secondary_employment_rate: 0.35,
+  /** Insurance relief: share of qualifying premiums, and monthly cap. */
+  insurance_relief_rate: 0.15,
+  insurance_relief_cap_monthly: 5_000,
+} as const;
+export type TaxLimits = { -readonly [K in keyof typeof TAX_LIMIT_DEFAULTS]: number };
+
+export function taxLimits(settings: PayrollSettings): TaxLimits {
+  const out = { ...TAX_LIMIT_DEFAULTS } as TaxLimits;
+  for (const k of Object.keys(out) as Array<keyof TaxLimits>) {
+    const v = settings.limits?.[k];
+    if (typeof v === 'number' && Number.isFinite(v)) out[k] = v;
+  }
+  return out;
+}
+
+/** @deprecated use taxLimits(settings).pension_deduction_cap_monthly */
+export const PENSION_DEDUCTION_CAP_MONTHLY = TAX_LIMIT_DEFAULTS.pension_deduction_cap_monthly;
+
+export type TaxResidency = 'resident' | 'non_resident';
+export type TaxEmploymentCategory = 'primary' | 'secondary';
+
+/** Per-employee tax circumstances (users_profile, migration 077). All optional: defaults = resident, primary. */
+export interface EmployeeTaxProfile {
+  tax_residency?: TaxResidency | null;
+  tax_employment_category?: TaxEmploymentCategory | null;
+  disability_exemption_cert_no?: string | null;
+  disability_exemption_expiry?: string | null;   // YYYY-MM-DD
+  mortgage_interest_monthly?: number | null;
+  post_retirement_medical_monthly?: number | null;
+}
+
+export interface ComputeOptions {
+  /** Last day of the pay period (YYYY-MM-DD) — used to check the disability certificate is still valid. */
+  periodEnd?: string;
+}
+
+/** True when the employee holds a disability exemption certificate valid for the period. */
+export function hasValidDisabilityExemption(p: EmployeeTaxProfile, periodEnd?: string): boolean {
+  if (!p.disability_exemption_cert_no?.trim()) return false;
+  if (!p.disability_exemption_expiry) return false;
+  const end = periodEnd ?? new Date().toISOString().slice(0, 10);
+  return p.disability_exemption_expiry >= end;
+}
 
 export function computePayrollLine(
   profile: Pick<
@@ -359,13 +451,18 @@ export function computePayrollLine(
     'id' | 'employee_id' | 'basic_salary' | 'allowances' | 'helb_monthly_amount' |
     'sacco_contribution' | 'sacco_loan_repayment' | 'medical_premium' |
     'supplementary_pension' | 'salary_advance_monthly_recovery'
-  >,
+  > & EmployeeTaxProfile,
   settings: PayrollSettings,
   otherDeductions: Array<{ name: string; amount: number }> = [],
   unpaidDays = 0,
   workingDaysInMonth = 22,
-  variablePay: Partial<VariablePayInput> = {}
+  variablePay: Partial<VariablePayInput> = {},
+  options: ComputeOptions = {}
 ): ComputedPayrollLine {
+  const L = taxLimits(settings);
+  const residency: TaxResidency = profile.tax_residency === 'non_resident' ? 'non_resident' : 'resident';
+  const secondary = profile.tax_employment_category === 'secondary';
+
   const allowancesTotal = Object.values(profile.allowances || {}).reduce(
     (sum, v) => sum + (Number(v) || 0),
     0
@@ -376,6 +473,7 @@ export function computePayrollLine(
   const bonusAmount       = variablePay.bonus_amount       || 0;
   const actingAllowance   = variablePay.acting_allowance   || 0;
   const perDiemAmount     = variablePay.per_diem_amount    || 0;
+  const perDiemDays       = Math.max(0, variablePay.per_diem_days || 0);
   const bik               = variablePay.benefits_in_kind   || 0;
   const otherVariablePay  = variablePay.other_variable_pay || [];
   const otherVariableTotal = otherVariablePay.reduce((s, v) => s + v.amount, 0);
@@ -388,37 +486,62 @@ export function computePayrollLine(
     : 1;
 
   // Variable pay is NOT prorated (paid for what was earned)
-  // gross_pay = cash components only (BIK excluded — not a bank transfer)
+  // gross_pay = cash paid (BIK excluded — not a bank transfer)
   const grossPay = Math.round(fixedGross * prorationFactor)
     + overtimeAmount + bonusAmount + actingAllowance + perDiemAmount + otherVariableTotal;
 
-  // NSSF — computed on cash gross (BIK excluded per NSSF Act)
-  const nssf = computeNSSF(grossPay, settings);
+  // Per diem (ITA s.5(2)(a)): up to the daily limit × days away on official duty is a
+  // reimbursement, not income — excluded from tax and from the NSSF/SHIF/Housing Levy
+  // base. Any excess, or per diem with no travel days recorded, is taxable pay.
+  const perDiemExempt = Math.min(perDiemAmount, Math.round(perDiemDays * L.per_diem_daily_exempt));
+  const statutoryBase = grossPay - perDiemExempt;
 
-  // SHA/SHIF and Housing Levy (employee shares)
-  const sha = computeSHA(grossPay, settings);
-  const housing = computeHousingLevy(grossPay, settings);
+  // Benefits in kind: tax-free when the aggregate value is within the annual limit
+  // (applied monthly: ≤ limit/12); above it the whole value is taxable.
+  const bikTaxable = bik > L.bik_annual_exempt / 12 ? bik : 0;
 
-  // Taxable income (Tax Laws (Amendment) Act 2024, effective 27 Dec 2024 — KRA
-  // public notice 2157): SHIF and the Affordable Housing Levy are deducted in
-  // full, and pension contributions (NSSF + registered supplementary pension)
-  // up to KES 30,000/month.
-  const pensionDeduction = Math.min(
-    nssf.employee + (profile.supplementary_pension || 0),
-    PENSION_DEDUCTION_CAP_MONTHLY
-  );
-  const taxableIncome = Math.max(0, grossPay + bik - pensionDeduction - sha - housing.employee);
+  // NSSF, SHA/SHIF and Housing Levy on cash earnings (BIK and per-diem reimbursement excluded)
+  const nssf = computeNSSF(statutoryBase, settings);
+  const sha = computeSHA(statutoryBase, settings);
+  const housing = computeHousingLevy(statutoryBase, settings);
 
-  // PAYE (before reliefs)
-  const { payeBeforeRelief, paye: payeAfterPersonalRelief } = computePAYE(
-    taxableIncome,
-    settings.paye_bands,
-    settings.paye_personal_relief
-  );
+  // Allowable deductions (Tax Laws (Amendment) Act 2024, effective 27 Dec 2024 — KRA
+  // notice 2157). Secondary employment gets none: they are claimed at the main employer.
+  const pensionDeduction = secondary ? 0 : Math.min(
+    nssf.employee + (profile.supplementary_pension || 0), L.pension_deduction_cap_monthly);
+  const mortgageDeduction = secondary || residency === 'non_resident' ? 0
+    : Math.min(Math.max(0, profile.mortgage_interest_monthly || 0), L.mortgage_interest_cap_monthly);
+  const prmfDeduction = secondary ? 0
+    : Math.min(Math.max(0, profile.post_retirement_medical_monthly || 0), L.prmf_cap_monthly);
+  const shaDeduction = secondary ? 0 : sha;
+  const housingDeduction = secondary ? 0 : housing.employee;
 
-  // Insurance relief = 15% of qualifying medical premium, capped KES 5,000/month
-  const insuranceRelief = Math.min(Math.round((profile.medical_premium || 0) * 0.15), 5000);
-  const paye = Math.max(0, payeAfterPersonalRelief - insuranceRelief);
+  const incomeAfterDeductions = Math.max(0,
+    statutoryBase + bikTaxable - pensionDeduction - shaDeduction - housingDeduction - mortgageDeduction - prmfDeduction);
+
+  // Persons with disability: first KES 150,000/month exempt with a valid certificate
+  const disabilityExemption = hasValidDisabilityExemption(profile, options.periodEnd)
+    ? Math.min(incomeAfterDeductions, L.disability_exemption_monthly) : 0;
+  const taxableIncome = incomeAfterDeductions - disabilityExemption;
+
+  // PAYE
+  let payeBeforeRelief: number;
+  let personalRelief: number;
+  let insuranceRelief: number;
+  if (secondary) {
+    // Highest marginal rate on the whole taxable pay; reliefs are given by the main employer
+    payeBeforeRelief = Math.round(taxableIncome * L.secondary_employment_rate);
+    personalRelief = 0;
+    insuranceRelief = 0;
+  } else {
+    payeBeforeRelief = computePAYE(taxableIncome, settings.paye_bands, 0).payeBeforeRelief;
+    // Reliefs are for residents only (KRA: non-residents get no personal relief)
+    personalRelief = residency === 'resident' ? settings.paye_personal_relief : 0;
+    insuranceRelief = residency === 'resident'
+      ? Math.min(Math.round((profile.medical_premium || 0) * L.insurance_relief_rate), L.insurance_relief_cap_monthly)
+      : 0;
+  }
+  const paye = Math.max(0, payeBeforeRelief - personalRelief - insuranceRelief);
 
   // Statutory deductions total
   const statutoryTotal = nssf.employee + sha + housing.employee + paye;
@@ -447,16 +570,24 @@ export function computePayrollLine(
     bonus_amount:       bonusAmount,
     acting_allowance:   actingAllowance,
     per_diem_amount:    perDiemAmount,
+    per_diem_days:      perDiemDays,
+    per_diem_exempt:    perDiemExempt,
     benefits_in_kind:   bik,
+    bik_taxable:        bikTaxable,
     other_variable_pay: otherVariablePay,
     gross_pay: grossPay,
     nssf_tier1: nssf.tier1,
     nssf_tier2: nssf.tier2,
     sha_amount: sha,
     housing_levy_employee: housing.employee,
+    pension_deduction:           pensionDeduction,
+    mortgage_interest_deduction: mortgageDeduction,
+    prmf_deduction:              prmfDeduction,
+    disability_exemption:        disabilityExemption,
+    tax_basis: secondary ? 'secondary' : residency,
     taxable_income: taxableIncome,
     paye_before_relief: payeBeforeRelief,
-    personal_relief: settings.paye_personal_relief,
+    personal_relief: personalRelief,
     insurance_relief:   insuranceRelief,
     paye_amount: paye,
     helb_amount: helb,
@@ -472,6 +603,86 @@ export function computePayrollLine(
     net_pay: netPay,
     nssf_employer: nssf.employer,
     housing_levy_employer: housing.employer,
+  };
+}
+
+/** users_profile columns needed to compute a payroll line. */
+export const PAYROLL_PROFILE_COLUMNS =
+  'id, employee_id, basic_salary, allowances, helb_monthly_amount, ' +
+  'sacco_contribution, sacco_loan_repayment, medical_premium, supplementary_pension, salary_advance_monthly_recovery, ' +
+  'tax_residency, tax_employment_category, disability_exemption_cert_no, disability_exemption_expiry, ' +
+  'mortgage_interest_monthly, post_retirement_medical_monthly';
+
+/** Map a users_profile row (PAYROLL_PROFILE_COLUMNS) to computePayrollLine's profile input. */
+export function toPayrollProfile(emp: Record<string, unknown>): Parameters<typeof computePayrollLine>[0] {
+  const num = (k: string) => Number(emp[k]) || 0;
+  return {
+    id:                              emp.id as string,
+    employee_id:                     emp.employee_id as string,
+    basic_salary:                    num('basic_salary'),
+    allowances:                      (emp.allowances as Record<string, number>) || {},
+    helb_monthly_amount:             num('helb_monthly_amount'),
+    sacco_contribution:              num('sacco_contribution'),
+    sacco_loan_repayment:            num('sacco_loan_repayment'),
+    medical_premium:                 num('medical_premium'),
+    supplementary_pension:           num('supplementary_pension'),
+    salary_advance_monthly_recovery: num('salary_advance_monthly_recovery'),
+    tax_residency:                   (emp.tax_residency as TaxResidency) ?? 'resident',
+    tax_employment_category:         (emp.tax_employment_category as TaxEmploymentCategory) ?? 'primary',
+    disability_exemption_cert_no:    (emp.disability_exemption_cert_no as string) ?? null,
+    disability_exemption_expiry:     (emp.disability_exemption_expiry as string) ?? null,
+    mortgage_interest_monthly:       num('mortgage_interest_monthly'),
+    post_retirement_medical_monthly: num('post_retirement_medical_monthly'),
+  };
+}
+
+/** Last day of a pay period as YYYY-MM-DD. */
+export function periodEndDate(year: number, month: number): string {
+  const d = new Date(Date.UTC(year, month, 0));
+  return d.toISOString().slice(0, 10);
+}
+
+/** payroll_lines columns written for a computed line (shared by run compute and per-line save). */
+export function lineToDbFields(c: ComputedPayrollLine) {
+  return {
+    overtime_amount:        c.overtime_amount,
+    overtime_hours:         c.overtime_hours,
+    bonus_amount:           c.bonus_amount,
+    acting_allowance:       c.acting_allowance,
+    per_diem_amount:        c.per_diem_amount,
+    per_diem_days:          c.per_diem_days,
+    per_diem_exempt:        c.per_diem_exempt,
+    benefits_in_kind:       c.benefits_in_kind,
+    bik_taxable:            c.bik_taxable,
+    other_variable_pay:     c.other_variable_pay,
+    court_deduction_amount: c.court_deduction_amount,
+    court_deduction_ref:    c.court_deduction_ref || null,
+    gross_pay:              c.gross_pay,
+    nssf_tier1:             c.nssf_tier1,
+    nssf_tier2:             c.nssf_tier2,
+    sha_amount:             c.sha_amount,
+    housing_levy_employee:  c.housing_levy_employee,
+    pension_deduction:           c.pension_deduction,
+    mortgage_interest_deduction: c.mortgage_interest_deduction,
+    prmf_deduction:              c.prmf_deduction,
+    disability_exemption:        c.disability_exemption,
+    tax_basis:                   c.tax_basis,
+    taxable_income:         c.taxable_income,
+    paye_before_relief:     c.paye_before_relief,
+    personal_relief:        c.personal_relief,
+    insurance_relief:       c.insurance_relief,
+    paye_amount:            c.paye_amount,
+    helb_amount:            c.helb_amount,
+    sacco_contribution:     c.sacco_contribution,
+    sacco_loan_repayment:   c.sacco_loan_repayment,
+    medical_premium:        c.medical_premium,
+    supplementary_pension:  c.supplementary_pension,
+    salary_advance_recovery: c.salary_advance_recovery,
+    other_deductions:       c.other_deductions,
+    total_deductions:       c.total_deductions,
+    net_pay:                c.net_pay,
+    nssf_employer:          c.nssf_employer,
+    housing_levy_employer:  c.housing_levy_employer,
   };
 }
 
@@ -624,17 +835,14 @@ export async function computeAndSaveRun(runId: string): Promise<{
     getPayrollSettings(),
     supabase
       .from('users_profile')
-      .select(
-        'id, employee_id, basic_salary, allowances, helb_monthly_amount, payroll_active, ' +
-        'sacco_contribution, sacco_loan_repayment, medical_premium, supplementary_pension, salary_advance_monthly_recovery'
-      )
+      .select(PAYROLL_PROFILE_COLUMNS)
       .eq('payroll_active', true)
       .eq('is_active', true),
     supabase.rpc('count_working_days_in_month', { p_year: year, p_month: month }),
     supabase.rpc('get_payroll_absence_days', { p_year: year, p_month: month }),
     supabase
       .from('payroll_lines')
-      .select('user_id, overtime_amount, overtime_hours, bonus_amount, acting_allowance, per_diem_amount, benefits_in_kind, other_variable_pay, court_deduction_amount, court_deduction_ref')
+      .select('user_id, overtime_amount, overtime_hours, bonus_amount, acting_allowance, per_diem_amount, per_diem_days, benefits_in_kind, other_variable_pay, court_deduction_amount, court_deduction_ref')
       .eq('run_id', runId),
   ]);
 
@@ -660,6 +868,7 @@ export async function computeAndSaveRun(runId: string): Promise<{
       bonus_amount:           row.bonus_amount           || 0,
       acting_allowance:       row.acting_allowance       || 0,
       per_diem_amount:        row.per_diem_amount        || 0,
+      per_diem_days:          row.per_diem_days          || 0,
       benefits_in_kind:       row.benefits_in_kind       || 0,
       other_variable_pay:     row.other_variable_pay     || [],
       court_deduction_amount: row.court_deduction_amount || 0,
@@ -672,23 +881,13 @@ export async function computeAndSaveRun(runId: string): Promise<{
     const unpaidDays = absence?.unpaid_days ?? 0;
     const varPay = existingVarPayMap[emp.id as string] ?? {};
     return computePayrollLine(
-      {
-        id:                               emp.id as string,
-        employee_id:                      emp.employee_id as string,
-        basic_salary:                     (emp.basic_salary as number) || 0,
-        allowances:                       (emp.allowances as Record<string, number>) || {},
-        helb_monthly_amount:              (emp.helb_monthly_amount as number) || 0,
-        sacco_contribution:               (emp.sacco_contribution as number) || 0,
-        sacco_loan_repayment:             (emp.sacco_loan_repayment as number) || 0,
-        medical_premium:                  (emp.medical_premium as number) || 0,
-        supplementary_pension:            (emp.supplementary_pension as number) || 0,
-        salary_advance_monthly_recovery:  (emp.salary_advance_monthly_recovery as number) || 0,
-      },
+      toPayrollProfile(emp),
       settings,
       [],
       unpaidDays,
       workingDaysInMonth,
-      varPay
+      varPay,
+      { periodEnd: periodEndDate(year, month) }
     );
   });
 
@@ -738,38 +937,7 @@ async function upsertPayrollLinesWithAbsence(
     employee_id: l.employee_id,
     basic_salary: l.basic_salary,
     allowances: l.allowances,
-    // Variable pay columns (SOP 6.2)
-    overtime_amount:   l.overtime_amount,
-    overtime_hours:    l.overtime_hours,
-    bonus_amount:      l.bonus_amount,
-    acting_allowance:  l.acting_allowance,
-    per_diem_amount:   l.per_diem_amount,
-    benefits_in_kind:  l.benefits_in_kind,
-    other_variable_pay: l.other_variable_pay,
-    gross_pay: l.gross_pay,
-    nssf_tier1: l.nssf_tier1,
-    nssf_tier2: l.nssf_tier2,
-    sha_amount: l.sha_amount,
-    housing_levy_employee: l.housing_levy_employee,
-    taxable_income: l.taxable_income,
-    paye_before_relief: l.paye_before_relief,
-    personal_relief: l.personal_relief,
-    insurance_relief:  l.insurance_relief,
-    paye_amount: l.paye_amount,
-    helb_amount: l.helb_amount,
-    // Non-statutory deductions (SOP 6.4)
-    sacco_contribution:        l.sacco_contribution,
-    sacco_loan_repayment:      l.sacco_loan_repayment,
-    medical_premium:           l.medical_premium,
-    supplementary_pension:     l.supplementary_pension,
-    salary_advance_recovery:   l.salary_advance_recovery,
-    court_deduction_amount:    l.court_deduction_amount,
-    court_deduction_ref:       l.court_deduction_ref || null,
-    other_deductions: l.other_deductions,
-    total_deductions: l.total_deductions,
-    net_pay: l.net_pay,
-    nssf_employer: l.nssf_employer,
-    housing_levy_employer: l.housing_levy_employer,
+    ...lineToDbFields(l),
     days_worked: l._days_worked,
     leave_days: l._leave_days,
     ooo_days: l._ooo_days,
@@ -841,7 +1009,9 @@ export async function getEmployeePayrollProfiles(includeInactive = false): Promi
       'id, employee_id, first_name, last_name, department_id, job_title, is_active, ' +
       'kra_pin, nssf_number, sha_number, helb_account, helb_monthly_amount, ' +
       'bank_name, bank_branch, bank_account_number, employment_type, ' +
-      'basic_salary, allowances, salary_grade, payroll_active'
+      'basic_salary, allowances, salary_grade, payroll_active, ' +
+      'tax_residency, tax_employment_category, disability_exemption_cert_no, disability_exemption_expiry, ' +
+      'mortgage_interest_monthly, post_retirement_medical_monthly'
     )
     .order('employee_id', { ascending: true });
   if (!includeInactive) query = query.eq('is_active', true);
@@ -1085,7 +1255,42 @@ export function downloadCSV(content: string, filename: string): void {
 // ─── Payslip HTML generation (SOP 8.2) ───────────────────────────────────────
 // Returns a complete HTML string that can be opened in a new tab and printed/saved.
 
-export function generatePayslipHtml(line: PayrollLine, run: PayrollRun): string {
+/** "Tax computation" section of the payslip — only for lines computed with migration 077's rules. */
+function taxComputationHtml(line: PayrollLine, kes: (n: number) => string): string {
+  if (!line.tax_basis) return '';
+  const secondary = line.tax_basis === 'secondary';
+  const row = (label: string, amount: number, sign = '', strong = false) =>
+    `<tr${strong ? ' class="total-row"' : ''}><td>${label}</td><td class="num">${sign}${kes(amount)}</td></tr>`;
+  const n = (v: number | undefined | null) => Number(v) || 0;
+  const rows = [
+    row('Gross pay', line.gross_pay),
+    n(line.per_diem_exempt) > 0 ? row('Less: tax-free per diem', n(line.per_diem_exempt), '− ') : '',
+    n(line.bik_taxable) > 0 ? row('Add: taxable benefits in kind', n(line.bik_taxable), '+ ') : '',
+    n(line.benefits_in_kind) > 0 && n(line.bik_taxable) === 0
+      ? `<tr><td colspan="2" style="color:#6b7280">Benefits in kind ${kes(n(line.benefits_in_kind))} — within the tax-free limit</td></tr>` : '',
+    !secondary && n(line.pension_deduction) > 0 ? row('Less: pension (NSSF + registered scheme)', n(line.pension_deduction), '− ') : '',
+    !secondary ? row('Less: SHIF', line.sha_amount, '− ') : '',
+    !secondary ? row('Less: Housing Levy', line.housing_levy_employee, '− ') : '',
+    n(line.mortgage_interest_deduction) > 0 ? row('Less: mortgage interest', n(line.mortgage_interest_deduction), '− ') : '',
+    n(line.prmf_deduction) > 0 ? row('Less: post-retirement medical fund', n(line.prmf_deduction), '− ') : '',
+    n(line.disability_exemption) > 0 ? row('Less: disability exemption', n(line.disability_exemption), '− ') : '',
+    row('Taxable income', line.taxable_income, '', true),
+    row(secondary ? 'PAYE at secondary-employment rate' : 'Tax on taxable income', line.paye_before_relief),
+    n(line.personal_relief) > 0 ? row('Less: personal relief', n(line.personal_relief), '− ') : '',
+    n(line.insurance_relief) > 0 ? row('Less: insurance relief', n(line.insurance_relief), '− ') : '',
+    row('PAYE', line.paye_amount, '', true),
+  ].join('');
+  const basis = secondary ? 'Secondary employment — reliefs claimed at main employer'
+    : line.tax_basis === 'non_resident' ? 'Non-resident — no personal or insurance relief' : 'Resident';
+  return `<table style="margin-top:16px;font-size:11px;">
+    <thead><tr><th>Tax computation <span style="font-weight:400;text-transform:none;color:#6b7280">· ${basis}</span></th><th class="num">KES</th></tr></thead>
+    <tbody>${rows}</tbody>
+  </table>`;
+}
+
+export type PayslipPeriod = Pick<PayrollRun, 'pay_period_month' | 'pay_period_year' | 'working_days_in_period'>;
+
+export function generatePayslipHtml(line: PayrollLine, run: PayslipPeriod): string {
   const empName = line.profile
     ? `${line.profile.first_name} ${line.profile.last_name}`
     : line.employee_id || 'Employee';
@@ -1101,8 +1306,9 @@ export function generatePayslipHtml(line: PayrollLine, run: PayrollRun): string 
     line.overtime_amount  > 0 ? `<tr><td>Overtime (${line.overtime_hours || 0} hrs)</td><td class="num">${kes(line.overtime_amount)}</td></tr>` : '',
     line.bonus_amount     > 0 ? `<tr><td>Performance Bonus</td><td class="num">${kes(line.bonus_amount)}</td></tr>` : '',
     line.acting_allowance > 0 ? `<tr><td>Acting Allowance</td><td class="num">${kes(line.acting_allowance)}</td></tr>` : '',
-    line.per_diem_amount  > 0 ? `<tr><td>Per Diem</td><td class="num">${kes(line.per_diem_amount)}</td></tr>` : '',
-    line.benefits_in_kind > 0 ? `<tr><td>Benefits in Kind</td><td class="num">${kes(line.benefits_in_kind)}</td></tr>` : '',
+    line.per_diem_amount  > 0 ? `<tr><td>Per Diem${(line.per_diem_exempt || 0) > 0
+      ? ` <span style="font-size:10px;color:#6b7280">(${kes(line.per_diem_exempt || 0)} tax-free · ${line.per_diem_days || 0} day${line.per_diem_days === 1 ? '' : 's'})</span>` : ''}</td><td class="num">${kes(line.per_diem_amount)}</td></tr>` : '',
+    // Benefits in kind are not cash pay — shown under Tax computation, not Earnings
     ...(line.other_variable_pay || []).map((v: { name: string; amount: number }) =>
       `<tr><td>${v.name}</td><td class="num">${kes(v.amount)}</td></tr>`
     ),
@@ -1208,6 +1414,8 @@ export function generatePayslipHtml(line: PayrollLine, run: PayrollRun): string 
   </div>
 </div>
 
+${taxComputationHtml(line, kes)}
+
 <div class="net-box">
   <span class="label">NET PAY — ${period}</span>
   <span class="amount">${kes(line.net_pay)}</span>
@@ -1221,7 +1429,7 @@ export function generatePayslipHtml(line: PayrollLine, run: PayrollRun): string 
 </body></html>`;
 }
 
-export function openPayslip(line: PayrollLine, run: PayrollRun): void {
+export function openPayslip(line: PayrollLine, run: PayslipPeriod): void {
   const html = generatePayslipHtml(line, run);
   const w = window.open('', '_blank');
   if (w) {
@@ -1246,20 +1454,16 @@ export async function saveVariablePayForLine(
   if (lineErr) throw lineErr;
   const line = lineData as PayrollLine & { run_id: string };
 
-  // Load the employee profile for fixed pay
+  // Load the employee profile (fixed pay + tax circumstances)
   const { data: empData, error: empErr } = await supabase
     .from('users_profile')
-    .select(
-      'id, employee_id, basic_salary, allowances, helb_monthly_amount, ' +
-      'sacco_contribution, sacco_loan_repayment, medical_premium, ' +
-      'supplementary_pension, salary_advance_monthly_recovery'
-    )
+    .select(PAYROLL_PROFILE_COLUMNS)
     .eq('id', line.user_id)
     .single();
   if (empErr) throw empErr;
   const emp = empData as unknown as Record<string, unknown>;
 
-  // Load run for working days
+  // Load run for working days and period
   const run = await getPayrollRunById(line.run_id);
   if (!run) throw new Error('Run not found');
 
@@ -1268,58 +1472,18 @@ export async function saveVariablePayForLine(
   const unpaidDays = workingDays - (line.days_worked ?? workingDays);
 
   const computed = computePayrollLine(
-    {
-      id:                               emp.id as string,
-      employee_id:                      emp.employee_id as string,
-      basic_salary:                     (emp.basic_salary as number) || 0,
-      allowances:                       (emp.allowances as Record<string, number>) || {},
-      helb_monthly_amount:              (emp.helb_monthly_amount as number) || 0,
-      sacco_contribution:               (emp.sacco_contribution as number) || 0,
-      sacco_loan_repayment:             (emp.sacco_loan_repayment as number) || 0,
-      medical_premium:                  (emp.medical_premium as number) || 0,
-      supplementary_pension:            (emp.supplementary_pension as number) || 0,
-      salary_advance_monthly_recovery:  (emp.salary_advance_monthly_recovery as number) || 0,
-    },
+    toPayrollProfile(emp),
     settings,
     (line.other_deductions as Array<{ name: string; amount: number }>) || [],
     unpaidDays,
     workingDays,
-    variablePay
+    variablePay,
+    { periodEnd: periodEndDate(run.pay_period_year, run.pay_period_month) }
   );
 
   const { error: updateErr } = await supabase
     .from('payroll_lines')
-    .update({
-      overtime_amount:        computed.overtime_amount,
-      overtime_hours:         computed.overtime_hours,
-      bonus_amount:           computed.bonus_amount,
-      acting_allowance:       computed.acting_allowance,
-      per_diem_amount:        computed.per_diem_amount,
-      benefits_in_kind:       computed.benefits_in_kind,
-      other_variable_pay:     computed.other_variable_pay,
-      court_deduction_amount: computed.court_deduction_amount,
-      court_deduction_ref:    computed.court_deduction_ref || null,
-      gross_pay:              computed.gross_pay,
-      nssf_tier1:             computed.nssf_tier1,
-      nssf_tier2:             computed.nssf_tier2,
-      sha_amount:             computed.sha_amount,
-      housing_levy_employee:  computed.housing_levy_employee,
-      taxable_income:         computed.taxable_income,
-      paye_before_relief:     computed.paye_before_relief,
-      personal_relief:        computed.personal_relief,
-      insurance_relief:       computed.insurance_relief,
-      paye_amount:            computed.paye_amount,
-      helb_amount:            computed.helb_amount,
-      sacco_contribution:     computed.sacco_contribution,
-      sacco_loan_repayment:   computed.sacco_loan_repayment,
-      medical_premium:        computed.medical_premium,
-      supplementary_pension:  computed.supplementary_pension,
-      salary_advance_recovery: computed.salary_advance_recovery,
-      total_deductions:       computed.total_deductions,
-      net_pay:                computed.net_pay,
-      nssf_employer:          computed.nssf_employer,
-      housing_levy_employer:  computed.housing_levy_employer,
-    })
+    .update(lineToDbFields(computed))
     .eq('id', lineId);
   if (updateErr) throw updateErr;
 

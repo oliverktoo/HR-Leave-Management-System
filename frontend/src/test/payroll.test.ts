@@ -145,8 +145,140 @@ describe('full payroll line', () => {
     expect(l.net_pay).toBe(70_442 - 2_000 - 3_000 - 1_000 - 4_000 - 500);
   });
 
+  test('benefits in kind within the annual exemption (≤ 60,000/yr = 5,000/month) are not taxed', () => {
+    const l = computePayrollLine(employee({ basic_salary: 100_000 }), SETTINGS, [], 0, 22, { benefits_in_kind: 4_000 });
+    expect(l.bik_taxable).toBe(0);
+    expect(l.taxable_income).toBe(89_750);
+    expect(l.paye_amount).toBe(19_308);
+  });
+
   test('net pay never goes negative', () => {
     const l = computePayrollLine(employee({ basic_salary: 10_000, salary_advance_monthly_recovery: 50_000 }), SETTINGS);
     expect(l.net_pay).toBe(0);
+  });
+});
+
+// ─── Special cases (migration 077) ───────────────────────────────────────────
+// Base: KES 100,000 gross → NSSF 6,000, SHIF 2,750, Housing Levy 1,500,
+// taxable 89,750, PAYE before relief 21,708, PAYE 19,308.
+const PERIOD = { periodEnd: '2026-09-30' };
+
+describe('per diem (ITA s.5(2)(a), KES 10,000/day tax-free)', () => {
+  test('within the daily limit: all tax-free, and outside the NSSF/SHIF/Housing Levy base', () => {
+    const l = computePayrollLine(employee({ basic_salary: 100_000 }), SETTINGS, [], 0, 22,
+      { per_diem_amount: 15_000, per_diem_days: 3 }, PERIOD);
+    expect(l.per_diem_exempt).toBe(15_000);
+    expect(l.gross_pay).toBe(115_000);
+    expect(l.taxable_income).toBe(89_750);
+    expect(l.paye_amount).toBe(19_308);
+    expect(l.net_pay).toBe(115_000 - 29_558);
+  });
+
+  test('above the limit: only the excess is pay', () => {
+    // 30,000 for 2 days → 20,000 tax-free, 10,000 taxable → base 110,000
+    const l = computePayrollLine(employee({ basic_salary: 100_000 }), SETTINGS, [], 0, 22,
+      { per_diem_amount: 30_000, per_diem_days: 2 }, PERIOD);
+    expect(l.per_diem_exempt).toBe(20_000);
+    expect(l.nssf_tier1 + l.nssf_tier2).toBe(6_480);
+    expect(l.sha_amount).toBe(3_025);
+    expect(l.housing_levy_employee).toBe(1_650);
+    expect(l.taxable_income).toBe(98_845);   // 110,000 − 6,480 − 3,025 − 1,650
+    expect(l.paye_amount).toBe(22_037);
+    expect(l.net_pay).toBe(130_000 - (6_480 + 3_025 + 1_650 + 22_037));
+  });
+
+  test('no travel days recorded: the whole per diem is taxable pay', () => {
+    const l = computePayrollLine(employee({ basic_salary: 100_000 }), SETTINGS, [], 0, 22,
+      { per_diem_amount: 30_000 }, PERIOD);
+    expect(l.per_diem_exempt).toBe(0);
+    expect(l.taxable_income).toBe(117_995);  // 130,000 − 6,480 − 3,575 − 1,950
+    expect(l.paye_amount).toBe(27_782);
+  });
+
+  test('the daily limit comes from payroll settings when set', () => {
+    const l = computePayrollLine(employee({ basic_salary: 100_000 }), { ...SETTINGS, limits: { per_diem_daily_exempt: 2_000 } },
+      [], 0, 22, { per_diem_amount: 30_000, per_diem_days: 2 }, PERIOD);
+    expect(l.per_diem_exempt).toBe(4_000);
+  });
+});
+
+describe('deductions from taxable income', () => {
+  test('owner-occupier mortgage interest, capped at 30,000/month', () => {
+    const l = computePayrollLine(employee({ basic_salary: 100_000, mortgage_interest_monthly: 40_000 }), SETTINGS, [], 0, 22, {}, PERIOD);
+    expect(l.mortgage_interest_deduction).toBe(30_000);
+    expect(l.taxable_income).toBe(59_750);
+    expect(l.paye_amount).toBe(10_308);
+    expect(l.net_pay).toBe(100_000 - (6_000 + 2_750 + 1_500 + 10_308));  // tax only — not a payroll deduction
+  });
+
+  test('post-retirement medical fund, capped at 15,000/month', () => {
+    const l = computePayrollLine(employee({ basic_salary: 100_000, post_retirement_medical_monthly: 20_000 }), SETTINGS, [], 0, 22, {}, PERIOD);
+    expect(l.prmf_deduction).toBe(15_000);
+    expect(l.taxable_income).toBe(74_750);
+    expect(l.paye_amount).toBe(14_808);
+  });
+});
+
+describe('persons with disability (first 150,000/month exempt)', () => {
+  const cert = { disability_exemption_cert_no: 'KRA/PWD/123', disability_exemption_expiry: '2028-12-31' };
+
+  test('income under the exemption: no PAYE', () => {
+    const l = computePayrollLine(employee({ basic_salary: 100_000, ...cert }), SETTINGS, [], 0, 22, {}, PERIOD);
+    expect(l.disability_exemption).toBe(89_750);
+    expect(l.taxable_income).toBe(0);
+    expect(l.paye_amount).toBe(0);
+  });
+
+  test('income above it: taxed on the excess, with personal relief', () => {
+    const l = computePayrollLine(employee({ basic_salary: 300_000, ...cert }), SETTINGS, [], 0, 22, {}, PERIOD);
+    expect(l.disability_exemption).toBe(150_000);
+    expect(l.taxable_income).toBe(130_770);  // 280,770 − 150,000
+    expect(l.paye_amount).toBe(31_614);
+  });
+
+  test('expired certificate: no exemption', () => {
+    const l = computePayrollLine(employee({ basic_salary: 300_000, ...cert, disability_exemption_expiry: '2026-09-29' }),
+      SETTINGS, [], 0, 22, {}, PERIOD);
+    expect(l.disability_exemption).toBe(0);
+    expect(l.paye_amount).toBe(76_614);
+  });
+
+  test('no certificate number: no exemption', () => {
+    const l = computePayrollLine(employee({ basic_salary: 300_000, ...cert, disability_exemption_cert_no: ' ' }),
+      SETTINGS, [], 0, 22, {}, PERIOD);
+    expect(l.disability_exemption).toBe(0);
+  });
+});
+
+describe('non-resident employee', () => {
+  test('normal bands and deductions, but no personal or insurance relief', () => {
+    const l = computePayrollLine(employee({ basic_salary: 100_000, tax_residency: 'non_resident', medical_premium: 10_000 }),
+      SETTINGS, [], 0, 22, {}, PERIOD);
+    expect(l.tax_basis).toBe('non_resident');
+    expect(l.taxable_income).toBe(89_750);
+    expect(l.personal_relief).toBe(0);
+    expect(l.insurance_relief).toBe(0);
+    expect(l.paye_amount).toBe(21_708);
+  });
+
+  test('mortgage interest deduction does not apply', () => {
+    const l = computePayrollLine(employee({ basic_salary: 100_000, tax_residency: 'non_resident', mortgage_interest_monthly: 30_000 }),
+      SETTINGS, [], 0, 22, {}, PERIOD);
+    expect(l.mortgage_interest_deduction).toBe(0);
+  });
+});
+
+describe('secondary employment', () => {
+  test('35% on the whole taxable pay, no deductions or reliefs', () => {
+    const l = computePayrollLine(employee({ basic_salary: 100_000, tax_employment_category: 'secondary',
+      mortgage_interest_monthly: 30_000, medical_premium: 10_000 }), SETTINGS, [], 0, 22, {}, PERIOD);
+    expect(l.tax_basis).toBe('secondary');
+    expect(l.taxable_income).toBe(100_000);
+    expect(l.personal_relief).toBe(0);
+    expect(l.insurance_relief).toBe(0);
+    expect(l.paye_amount).toBe(35_000);
+    // statutory contributions are still deducted from pay
+    expect(l.nssf_tier1 + l.nssf_tier2 + l.sha_amount + l.housing_levy_employee).toBe(10_250);
+    expect(l.net_pay).toBe(100_000 - (10_250 + 35_000) - 10_000);
   });
 });

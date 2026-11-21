@@ -65,6 +65,12 @@ export function EmployeePayrollProfiles() {
         allowances:           editing.allowances,
         salary_grade:         editing.salary_grade,
         payroll_active:       editing.payroll_active,
+        tax_residency:                    editing.tax_residency ?? 'resident',
+        tax_employment_category:          editing.tax_employment_category ?? 'primary',
+        disability_exemption_cert_no:     editing.disability_exemption_cert_no?.trim() || null,
+        disability_exemption_expiry:      editing.disability_exemption_expiry || null,
+        mortgage_interest_monthly:        editing.mortgage_interest_monthly ?? 0,
+        post_retirement_medical_monthly:  editing.post_retirement_medical_monthly ?? 0,
       });
       setEmployees(prev => prev.map(e => e.id === editing.id ? { ...e, ...editing } : e));
       setEditing(null);
@@ -165,6 +171,18 @@ export function EmployeePayrollProfiles() {
                     <strong>{emp.first_name} {emp.last_name}</strong>
                     <div style={{ fontSize: '0.75rem', color: '#94a3b8' }}>
                       {emp.employee_id}
+                      {emp.tax_residency === 'non_resident' && (
+                        <span style={{ marginLeft: 6, color: '#1e40af', background: '#dbeafe', borderRadius: 4, padding: '0 6px' }}>Non-resident</span>
+                      )}
+                      {emp.tax_employment_category === 'secondary' && (
+                        <span style={{ marginLeft: 6, color: '#6b21a8', background: '#f3e8ff', borderRadius: 4, padding: '0 6px' }}>Secondary employment</span>
+                      )}
+                      {emp.disability_exemption_cert_no && (
+                        <span style={{ marginLeft: 6, color: '#065f46', background: '#d1fae5', borderRadius: 4, padding: '0 6px' }}
+                          title={emp.disability_exemption_expiry ? `Certificate valid until ${emp.disability_exemption_expiry}` : 'No expiry date entered'}>
+                          Disability exemption
+                        </span>
+                      )}
                       {emp.is_active === false && (
                         <span style={{ marginLeft: 6, color: '#991b1b', background: '#fee2e2', borderRadius: 4, padding: '0 6px' }}>
                           Account deactivated
@@ -289,6 +307,60 @@ export function EmployeePayrollProfiles() {
                   >✕</button>
                 </div>
               ))}
+            </div>
+
+            {/* Tax status — special PAYE cases (migration 077) */}
+            <div style={{ marginBottom: '1rem', border: '1px solid #e5e7eb', borderRadius: 8, padding: '0.75rem 1rem' }}>
+              <strong>Tax status</strong>
+              <div style={{ fontSize: '0.78rem', color: '#64748b', margin: '2px 0 0.75rem' }}>
+                Leave as Resident / Main employment unless the employee has documents showing otherwise.
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
+                <div className="form-group">
+                  <label className="form-label">Tax residency</label>
+                  <select className="form-control" value={editing.tax_residency ?? 'resident'}
+                    onChange={e => setField('tax_residency', e.target.value as 'resident' | 'non_resident')}>
+                    <option value="resident">Resident</option>
+                    <option value="non_resident">Non-resident (no personal or insurance relief)</option>
+                  </select>
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Employment for tax</label>
+                  <select className="form-control" value={editing.tax_employment_category ?? 'primary'}
+                    onChange={e => setField('tax_employment_category', e.target.value as 'primary' | 'secondary')}>
+                    <option value="primary">Main employment</option>
+                    <option value="secondary">Secondary employment (35%, no reliefs)</option>
+                  </select>
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Disability exemption certificate no.</label>
+                  <input className="form-control" value={editing.disability_exemption_cert_no ?? ''}
+                    placeholder="KRA exemption certificate"
+                    onChange={e => setField('disability_exemption_cert_no', e.target.value || null)} />
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Certificate valid until</label>
+                  <input type="date" className="form-control" value={editing.disability_exemption_expiry ?? ''}
+                    onChange={e => setField('disability_exemption_expiry', e.target.value || null)} />
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Mortgage interest / month (KES)</label>
+                  <input type="number" min={0} className="form-control" value={editing.mortgage_interest_monthly ?? 0}
+                    onChange={e => setField('mortgage_interest_monthly', Number(e.target.value) || 0)} />
+                  <div style={{ fontSize: '0.72rem', color: '#64748b' }}>Owner-occupied home; deductible up to 30,000/month</div>
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Post-retirement medical fund / month (KES)</label>
+                  <input type="number" min={0} className="form-control" value={editing.post_retirement_medical_monthly ?? 0}
+                    onChange={e => setField('post_retirement_medical_monthly', Number(e.target.value) || 0)} />
+                  <div style={{ fontSize: '0.72rem', color: '#64748b' }}>Deductible up to 15,000/month</div>
+                </div>
+              </div>
+              {editing.disability_exemption_cert_no && !editing.disability_exemption_expiry && (
+                <div style={{ fontSize: '0.8rem', color: '#b45309', marginTop: 4 }}>
+                  Enter the certificate's expiry date — the exemption is only applied while it is valid.
+                </div>
+              )}
             </div>
 
             <div className="form-group" style={{ marginBottom: '1rem' }}>
