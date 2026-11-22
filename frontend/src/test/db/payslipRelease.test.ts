@@ -26,7 +26,8 @@ const release = (uid: string, runId: string, on: boolean) => asUser(db, uid, (tx
 beforeAll(async () => {
   db = await createLeaveDb(['021_ooo_requests.sql', '030_payroll_foundation.sql', '031_payroll_approval_roles.sql',
     '032_payroll_leave_integration.sql', '057_payroll_sop_compliance.sql', '058_payroll_gap_fixes.sql',
-    '076_payslip_release.sql', '077_payroll_special_cases.sql', '078_salary_arrears.sql']);
+    '076_payslip_release.sql', '077_payroll_special_cases.sql', '078_salary_arrears.sql',
+    '041_exit_management.sql', '079_final_dues.sql']);
   hr = await addUser(db, 'hr_admin');
   emp1 = await addUser(db, 'employee');
   emp2 = await addUser(db, 'employee');
@@ -159,5 +160,38 @@ describe('078 salary arrears records', () => {
     await expect(db.query(
       `INSERT INTO payroll_arrears (run_id, line_id, user_id, description, amount, from_month, to_month, breakdown)
        VALUES ($1, $2, $3, 'X', 100, '2026-09-01', '2026-07-01', '[]')`, [approvedRun, lineId, emp1])).rejects.toThrow(/check/i);
+  });
+});
+
+describe('079 final dues and exit requests', () => {
+  const submit = (uid: string, extra = '') => asUser(db, uid, (tx) => tx.query(
+    `INSERT INTO exit_requests (user_id, employee_id, exit_type, notice_date, last_working_date${extra ? ', ' + extra.split('=')[0] : ''})
+     VALUES ($1, 'FKF1', 'resignation', '2026-10-01', '2026-10-31'${extra ? ', ' + extra.split('=')[1] : ''}) RETURNING id`, [uid]));
+
+  test('staff can submit their own exit request', async () => {
+    const { rows } = await submit(emp2);
+    expect(rows).toHaveLength(1);
+  });
+
+  test('staff cannot submit one already marked completed', async () => {
+    await expect(submit(emp2, "status='completed'")).rejects.toThrow(/row-level security/);
+  });
+
+  test('staff cannot change their exit request after submitting', async () => {
+    const { rows } = await db.query<{ id: string }>(`SELECT id FROM exit_requests WHERE user_id = $1 LIMIT 1`, [emp2]);
+    const res = await asUser(db, emp2, (tx) => tx.query(
+      `UPDATE exit_requests SET status = 'completed', hr_notes = 'self-cleared' WHERE id = $1`, [rows[0].id]));
+    expect(res.affectedRows).toBe(0);
+    const { rows: after } = await db.query(`SELECT status, hr_notes FROM exit_requests WHERE id = $1`, [rows[0].id]);
+    expect(after[0]).toEqual({ status: 'pending', hr_notes: null });
+  });
+
+  test('final dues records: HR writes, finance reads, staff see nothing', async () => {
+    const { rows } = await db.query<{ id: string }>(`SELECT id FROM payroll_lines WHERE run_id = $1 AND user_id = $2`, [approvedRun, emp2]);
+    await asUser(db, hr, (tx) => tx.query(
+      `INSERT INTO final_dues (line_id, run_id, user_id, last_working_date, days_worked, inputs, tax_working, terminal_paye)
+       VALUES ($1, $2, $3, '2026-07-31', 22, '{}', '{}', 1000)`, [rows[0].id, approvedRun, emp2]));
+    expect((await asUser(db, finance, (tx) => tx.query(`SELECT 1 FROM final_dues`))).rows).toHaveLength(1);
+    expect((await asUser(db, emp2, (tx) => tx.query(`SELECT 1 FROM final_dues`))).rows).toHaveLength(0);
   });
 });

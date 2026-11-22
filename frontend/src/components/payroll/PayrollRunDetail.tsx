@@ -25,6 +25,7 @@ import { useAuth } from '../../hooks/useAuth';
 import { AdminSidebar } from '../admin/AdminSidebar';
 import NotificationBell from '../notifications/NotificationBell';
 import { ArrearsModal } from './ArrearsModal';
+import { FinalDuesModal } from './FinalDuesModal';
 
 // ─── Status flow ───────────────────────────────────────────────────────────────
 
@@ -314,6 +315,7 @@ export function PayrollRunDetail() {
   const [confirmAction,    setConfirmAction]    = useState<ApprovalAction | null>(null);
   const [editVarPayLine,   setEditVarPayLine]   = useState<PayrollLine | null>(null);
   const [arrearsLine,      setArrearsLine]      = useState<PayrollLine | null>(null);
+  const [finalDuesLine,    setFinalDuesLine]    = useState<PayrollLine | null>(null);
   const [markRemittance,   setMarkRemittance]   = useState<PayrollRemittance | null>(null);
   const [showRevisionModal, setShowRevisionModal] = useState(false);
 
@@ -639,6 +641,13 @@ export function PayrollRunDetail() {
                               Arrears{(line.arrears_amount || 0) > 0 ? ' ✓' : ''}
                             </button>
                           )}
+                          {isDraft && isHrAdmin && (
+                            <button className="btn btn-sm btn-outline" onClick={() => setFinalDuesLine(line)}
+                              title="Leaver's final pay: leave, notice, severance, gratuity">
+                              Final dues{((line.leave_pay || 0) + (line.notice_pay || 0) + (line.severance_pay || 0)
+                                + (line.gratuity_amount || 0) + (line.compensation_amount || 0)) > 0 ? ' ✓' : ''}
+                            </button>
+                          )}
                           <button className="btn btn-sm btn-outline"
                             onClick={() => openPayslip(line, run)}
                             title="View payslip">
@@ -741,6 +750,14 @@ export function PayrollRunDetail() {
           line={arrearsLine}
           onSaved={load}
           onClose={() => setArrearsLine(null)}
+        />
+      )}
+
+      {finalDuesLine && (
+        <FinalDuesModal
+          line={finalDuesLine}
+          onSaved={load}
+          onClose={() => setFinalDuesLine(null)}
         />
       )}
 

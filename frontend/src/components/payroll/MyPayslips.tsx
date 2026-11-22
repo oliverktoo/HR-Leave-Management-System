@@ -184,6 +184,12 @@ function Payslip({ run, line }: { run: MyPayslipRun; line: PayrollLine }) {
         ? `Per Diem (${formatKES(line.per_diem_exempt || 0)} tax-free)` : 'Per Diem', amount: line.per_diem_amount || 0 },
     ...otherVariable.map(v => ({ label: v.name, amount: v.amount })),
     { label: 'Salary arrears (back pay)', amount: line.arrears_amount || 0 },
+    { label: 'Leave pay (untaken leave)', amount: line.leave_pay || 0 },
+    { label: 'Pay in lieu of notice', amount: line.notice_pay || 0 },
+    { label: 'Severance pay', amount: line.severance_pay || 0 },
+    { label: (line.gratuity_exempt || 0) > 0 ? `Gratuity (${formatKES(line.gratuity_exempt || 0)} tax-free)` : 'Gratuity',
+      amount: line.gratuity_amount || 0 },
+    { label: 'Compensation for loss of office', amount: line.compensation_amount || 0 },
   ].filter(v => v.amount > 0);
   const variableTotal = variablePay.reduce((s, v) => s + v.amount, 0);
   const fixedPay = line.basic_salary + Object.values(line.allowances || {}).reduce((s, v) => s + Number(v), 0);
@@ -259,6 +265,7 @@ function Payslip({ run, line }: { run: MyPayslipRun; line: PayrollLine }) {
         {line.personal_relief > 0 && <Row label="Personal Relief" value={`+${formatKES(line.personal_relief)}`} />}
         {(line.insurance_relief || 0) > 0 && <Row label="Insurance Relief" value={`+${formatKES(line.insurance_relief)}`} />}
         {(line.arrears_paye || 0) > 0 && <Row label="PAYE on salary arrears (spread back)" value={`(${formatKES(line.arrears_paye || 0)})`} />}
+        {(line.terminal_paye || 0) > 0 && <Row label="PAYE on severance, gratuity and compensation" value={`(${formatKES(line.terminal_paye || 0)})`} />}
         <Row label="PAYE"                     value={`(${formatKES(line.paye_amount)})`} />
         {line.helb_amount > 0 && <Row label="HELB" value={`(${formatKES(line.helb_amount)})`} />}
         {otherPayrollDeductions.map(d => <Row key={d.label} label={d.label} value={`(${formatKES(d.amount)})`} />)}

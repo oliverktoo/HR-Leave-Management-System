@@ -304,3 +304,25 @@ describe('salary arrears on a payslip line', () => {
     expect(l.paye_amount).toBe(19_308);
   });
 });
+
+describe('final dues on a payslip line', () => {
+  test('leave and notice pay are ordinary pay; severance and gratuity are lump sums taxed separately', () => {
+    const l = computePayrollLine(employee({ basic_salary: 100_000 }), SETTINGS, [], 0, 22, {
+      leave_pay: 50_000, notice_pay: 100_000,
+      severance_pay: 400_000, gratuity_amount: 240_000, gratuity_exempt: 120_000,
+      terminal_paye: 156_000,   // 120,000 severance + 36,000 gratuity (see finalDues.test.ts)
+    }, PERIOD);
+    expect(l.gross_pay).toBe(890_000);
+    expect(l.nssf_tier1 + l.nssf_tier2).toBe(6_480);   // on 250,000 of ordinary pay
+    expect(l.sha_amount).toBe(6_875);
+    expect(l.housing_levy_employee).toBe(3_750);
+    expect(l.taxable_income).toBe(232_895);            // 250,000 − 6,480 − 6,875 − 3,750
+    expect(l.paye_amount).toBe(62_252 + 156_000);
+    expect(l.net_pay).toBe(890_000 - (6_480 + 6_875 + 3_750 + 218_252));
+  });
+
+  test('terminal PAYE is ignored when there are no lump sums', () => {
+    const l = computePayrollLine(employee({ basic_salary: 100_000 }), SETTINGS, [], 0, 22, { terminal_paye: 9_999 }, PERIOD);
+    expect(l.paye_amount).toBe(19_308);
+  });
+});

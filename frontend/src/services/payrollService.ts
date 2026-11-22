@@ -1,7 +1,8 @@
 // Payroll Service — Kenya-law-compliant computation engine + CRUD for runs/lines
 
 import { supabase } from '../lib/supabaseClient';
-import { computeArrearsTax, spreadArrears, type ArrearsEntry, type ArrearsResult, type Month, type TaxBasis } from './arrears';
+import { computeArrearsTax, monthsBetween, spreadArrears, type ArrearsEntry, type ArrearsResult, type Month, type TaxBasis } from './arrears';
+import { splitGratuity, terminalTax, type TerminalTax } from './finalDues';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -67,6 +68,14 @@ export interface VariablePayInput {
   per_diem_days: number;       // days away on official duty (tax-free per diem = days × daily limit)
   arrears_amount: number;      // back pay for earlier months, paid this month
   arrears_paye: number;        // extra PAYE on the arrears, worked out by spreading back (arrears.ts)
+  // Final dues on leaving (finalDues.ts, migration 079)
+  leave_pay: number;           // untaken leave — ordinary pay this month
+  notice_pay: number;          // pay in lieu of notice — ordinary pay this month
+  severance_pay: number;       // lump sum — taxed by terminal_paye
+  gratuity_amount: number;     // cash gratuity — taxable part (pre-Jul 2025) taxed by terminal_paye
+  gratuity_exempt: number;     // part of gratuity_amount earned from Jul 2025 (tax-free)
+  compensation_amount: number; // compensation for loss of office — taxed by terminal_paye
+  terminal_paye: number;       // PAYE on severance + gratuity + compensation
   benefits_in_kind: number;    // non-cash taxable benefits (company car, housing, etc.)
   court_deduction_amount: number;
   court_deduction_ref: string;
@@ -123,6 +132,13 @@ export interface ComputedPayrollLine {
   arrears_paye: number;           // PAYE on the arrears (included in paye_amount)
   arrears_sha: number;            // SHIF on the arrears (included in sha_amount)
   arrears_housing_levy: number;   // Housing Levy on the arrears (included in housing_levy_employee)
+  leave_pay: number;
+  notice_pay: number;
+  severance_pay: number;
+  gratuity_amount: number;
+  gratuity_exempt: number;
+  compensation_amount: number;
+  terminal_paye: number;          // included in paye_amount
   other_variable_pay: Array<{ name: string; amount: number }>;
   benefits_in_kind: number;       // non-cash BIK (not cash gross)
   bik_taxable: number;            // BIK added to taxable income (0 when within the annual exemption)
@@ -223,6 +239,13 @@ export interface PayrollLine {
   arrears_paye?: number;
   arrears_sha?: number;
   arrears_housing_levy?: number;
+  leave_pay?: number;
+  notice_pay?: number;
+  severance_pay?: number;
+  gratuity_amount?: number;
+  gratuity_exempt?: number;
+  compensation_amount?: number;
+  terminal_paye?: number;
   bik_taxable?: number;
   pension_deduction?: number;
   mortgage_interest_deduction?: number;
@@ -492,6 +515,16 @@ export function computePayrollLine(
   // spreading back (arrears.ts) and passed in as arrears_paye.
   const arrearsAmount     = Math.max(0, variablePay.arrears_amount || 0);
   const arrearsPaye       = arrearsAmount > 0 ? Math.max(0, variablePay.arrears_paye || 0) : 0;
+  // Final dues: leave and notice pay are ordinary pay this month; severance, gratuity and
+  // compensation are lump sums taxed separately (finalDues.ts) via terminal_paye.
+  const leavePay          = Math.max(0, variablePay.leave_pay || 0);
+  const noticePay         = Math.max(0, variablePay.notice_pay || 0);
+  const severancePay      = Math.max(0, variablePay.severance_pay || 0);
+  const gratuityAmount    = Math.max(0, variablePay.gratuity_amount || 0);
+  const gratuityExempt    = Math.min(gratuityAmount, Math.max(0, variablePay.gratuity_exempt || 0));
+  const compensationAmount = Math.max(0, variablePay.compensation_amount || 0);
+  const terminalLumps     = severancePay + gratuityAmount + compensationAmount;
+  const terminalPaye      = terminalLumps > 0 ? Math.max(0, variablePay.terminal_paye || 0) : 0;
 
   const fixedGross = profile.basic_salary + allowancesTotal;
 
@@ -503,8 +536,9 @@ export function computePayrollLine(
   // Variable pay is NOT prorated (paid for what was earned)
   // gross_pay = cash paid (BIK excluded — not a bank transfer)
   const currentGross = Math.round(fixedGross * prorationFactor)
-    + overtimeAmount + bonusAmount + actingAllowance + perDiemAmount + otherVariableTotal;
-  const grossPay = currentGross + arrearsAmount;
+    + overtimeAmount + bonusAmount + actingAllowance + perDiemAmount + otherVariableTotal
+    + leavePay + noticePay;
+  const grossPay = currentGross + arrearsAmount + terminalLumps;
 
   // Per diem (ITA s.5(2)(a)): up to the daily limit × days away on official duty is a
   // reimbursement, not income — excluded from tax and from the NSSF/SHIF/Housing Levy
@@ -567,7 +601,7 @@ export function computePayrollLine(
       ? Math.min(Math.round((profile.medical_premium || 0) * L.insurance_relief_rate), L.insurance_relief_cap_monthly)
       : 0;
   }
-  const paye = Math.max(0, payeBeforeRelief - personalRelief - insuranceRelief) + arrearsPaye;
+  const paye = Math.max(0, payeBeforeRelief - personalRelief - insuranceRelief) + arrearsPaye + terminalPaye;
 
   // Statutory deductions total
   const statutoryTotal = nssf.employee + sha + housing.employee + paye;
@@ -602,6 +636,13 @@ export function computePayrollLine(
     arrears_paye:       arrearsPaye,
     arrears_sha:        shaArrears,
     arrears_housing_levy: housingArrears.employee,
+    leave_pay:          leavePay,
+    notice_pay:         noticePay,
+    severance_pay:      severancePay,
+    gratuity_amount:    gratuityAmount,
+    gratuity_exempt:    gratuityExempt,
+    compensation_amount: compensationAmount,
+    terminal_paye:      terminalPaye,
     benefits_in_kind:   bik,
     bik_taxable:        bikTaxable,
     other_variable_pay: otherVariablePay,
@@ -666,6 +707,16 @@ export function toPayrollProfile(emp: Record<string, unknown>): Parameters<typeo
   };
 }
 
+/** Final-dues amounts stored on a payroll line, as variable-pay input. */
+export function finalDuesFields(row: Record<string, unknown>): Partial<VariablePayInput> {
+  const n = (k: string) => Number(row[k]) || 0;
+  return {
+    leave_pay: n('leave_pay'), notice_pay: n('notice_pay'), severance_pay: n('severance_pay'),
+    gratuity_amount: n('gratuity_amount'), gratuity_exempt: n('gratuity_exempt'),
+    compensation_amount: n('compensation_amount'), terminal_paye: n('terminal_paye'),
+  };
+}
+
 /** Last day of a pay period as YYYY-MM-DD. */
 export function periodEndDate(year: number, month: number): string {
   const d = new Date(Date.UTC(year, month, 0));
@@ -686,6 +737,13 @@ export function lineToDbFields(c: ComputedPayrollLine) {
     arrears_paye:           c.arrears_paye,
     arrears_sha:            c.arrears_sha,
     arrears_housing_levy:   c.arrears_housing_levy,
+    leave_pay:              c.leave_pay,
+    notice_pay:             c.notice_pay,
+    severance_pay:          c.severance_pay,
+    gratuity_amount:        c.gratuity_amount,
+    gratuity_exempt:        c.gratuity_exempt,
+    compensation_amount:    c.compensation_amount,
+    terminal_paye:          c.terminal_paye,
     benefits_in_kind:       c.benefits_in_kind,
     bik_taxable:            c.bik_taxable,
     other_variable_pay:     c.other_variable_pay,
@@ -876,7 +934,9 @@ export async function computeAndSaveRun(runId: string): Promise<{
     supabase.rpc('get_payroll_absence_days', { p_year: year, p_month: month }),
     supabase
       .from('payroll_lines')
-      .select('user_id, overtime_amount, overtime_hours, bonus_amount, acting_allowance, per_diem_amount, per_diem_days, arrears_amount, arrears_paye, benefits_in_kind, other_variable_pay, court_deduction_amount, court_deduction_ref')
+      .select('user_id, overtime_amount, overtime_hours, bonus_amount, acting_allowance, per_diem_amount, per_diem_days, arrears_amount, arrears_paye, ' +
+        'leave_pay, notice_pay, severance_pay, gratuity_amount, gratuity_exempt, compensation_amount, terminal_paye, ' +
+        'benefits_in_kind, other_variable_pay, court_deduction_amount, court_deduction_ref')
       .eq('run_id', runId),
   ]);
 
@@ -895,7 +955,7 @@ export async function computeAndSaveRun(runId: string): Promise<{
 
   // Preserve any variable pay already entered on existing lines
   const existingVarPayMap: Record<string, Partial<VariablePayInput>> = {};
-  for (const row of (existingLinesResult.data || [])) {
+  for (const row of ((existingLinesResult.data || []) as unknown as Array<Record<string, any>>)) {
     existingVarPayMap[row.user_id] = {
       overtime_amount:        row.overtime_amount        || 0,
       overtime_hours:         row.overtime_hours         || 0,
@@ -905,6 +965,7 @@ export async function computeAndSaveRun(runId: string): Promise<{
       per_diem_days:          row.per_diem_days          || 0,
       arrears_amount:         row.arrears_amount         || 0,
       arrears_paye:           row.arrears_paye           || 0,
+      ...finalDuesFields(row),
       benefits_in_kind:       row.benefits_in_kind       || 0,
       other_variable_pay:     row.other_variable_pay     || [],
       court_deduction_amount: row.court_deduction_amount || 0,
@@ -1301,6 +1362,9 @@ function taxComputationHtml(line: PayrollLine, kes: (n: number) => string): stri
   const rows = [
     row('Gross pay', line.gross_pay),
     n(line.arrears_amount) > 0 ? row('Less: salary arrears (taxed separately, below)', n(line.arrears_amount), '− ') : '',
+    n(line.severance_pay) + n(line.gratuity_amount) + n(line.compensation_amount) > 0
+      ? row('Less: severance, gratuity, compensation (taxed separately, below)',
+            n(line.severance_pay) + n(line.gratuity_amount) + n(line.compensation_amount), '− ') : '',
     n(line.per_diem_exempt) > 0 ? row('Less: tax-free per diem', n(line.per_diem_exempt), '− ') : '',
     n(line.bik_taxable) > 0 ? row('Add: taxable benefits in kind', n(line.bik_taxable), '+ ') : '',
     n(line.benefits_in_kind) > 0 && n(line.bik_taxable) === 0
@@ -1316,6 +1380,7 @@ function taxComputationHtml(line: PayrollLine, kes: (n: number) => string): stri
     n(line.personal_relief) > 0 ? row('Less: personal relief', n(line.personal_relief), '− ') : '',
     n(line.insurance_relief) > 0 ? row('Less: insurance relief', n(line.insurance_relief), '− ') : '',
     n(line.arrears_paye) > 0 ? row('Add: PAYE on salary arrears (spread back to the months earned)', n(line.arrears_paye), '+ ') : '',
+    n(line.terminal_paye) > 0 ? row('Add: PAYE on severance, gratuity and compensation', n(line.terminal_paye), '+ ') : '',
     row('PAYE', line.paye_amount, '', true),
   ].join('');
   const basis = secondary ? 'Secondary employment — reliefs claimed at main employer'
@@ -1347,6 +1412,11 @@ export function generatePayslipHtml(line: PayrollLine, run: PayslipPeriod): stri
     line.per_diem_amount  > 0 ? `<tr><td>Per Diem${(line.per_diem_exempt || 0) > 0
       ? ` <span style="font-size:10px;color:#6b7280">(${kes(line.per_diem_exempt || 0)} tax-free · ${line.per_diem_days || 0} day${line.per_diem_days === 1 ? '' : 's'})</span>` : ''}</td><td class="num">${kes(line.per_diem_amount)}</td></tr>` : '',
     (line.arrears_amount || 0) > 0 ? `<tr><td>Salary arrears <span style="font-size:10px;color:#6b7280">(back pay for earlier months)</span></td><td class="num">${kes(line.arrears_amount || 0)}</td></tr>` : '',
+    (line.leave_pay || 0) > 0 ? `<tr><td>Leave pay (untaken leave)</td><td class="num">${kes(line.leave_pay || 0)}</td></tr>` : '',
+    (line.notice_pay || 0) > 0 ? `<tr><td>Pay in lieu of notice</td><td class="num">${kes(line.notice_pay || 0)}</td></tr>` : '',
+    (line.severance_pay || 0) > 0 ? `<tr><td>Severance pay</td><td class="num">${kes(line.severance_pay || 0)}</td></tr>` : '',
+    (line.gratuity_amount || 0) > 0 ? `<tr><td>Gratuity${(line.gratuity_exempt || 0) > 0 ? ` <span style="font-size:10px;color:#6b7280">(${kes(line.gratuity_exempt || 0)} tax-free)</span>` : ''}</td><td class="num">${kes(line.gratuity_amount || 0)}</td></tr>` : '',
+    (line.compensation_amount || 0) > 0 ? `<tr><td>Compensation for loss of office</td><td class="num">${kes(line.compensation_amount || 0)}</td></tr>` : '',
     // Benefits in kind are not cash pay — shown under Tax computation, not Earnings
     ...(line.other_variable_pay || []).map((v: { name: string; amount: number }) =>
       `<tr><td>${v.name}</td><td class="num">${kes(v.amount)}</td></tr>`
@@ -1510,10 +1580,11 @@ export async function saveVariablePayForLine(
   const workingDays = run.working_days_in_period ?? 22;
   const unpaidDays = workingDays - (line.days_worked ?? workingDays);
 
-  // Keep arrears already on the line unless this save sets them
+  // Keep arrears and final dues already on the line unless this save sets them
   const withArrears: Partial<VariablePayInput> = {
     arrears_amount: line.arrears_amount || 0,
     arrears_paye:   line.arrears_paye   || 0,
+    ...finalDuesFields(line as unknown as Record<string, unknown>),
     ...variablePay,
   };
 
@@ -1734,6 +1805,240 @@ export async function saveArrearsForLine(
     arrears_paye: result.extraPaye,
   });
   return result;
+}
+
+
+// ─── Final dues on leaving (migration 079) ───────────────────────────────────
+
+export interface FinalDuesInputs {
+  exitRequestId: string | null;
+  lastWorkingDate: string;       // YYYY-MM-DD
+  daysWorked: number;            // working days paid in the final month
+  leaveDays: number;
+  leaveDailyRate: number;
+  leavePay: number;
+  noticeMonths: number;
+  noticePay: number;
+  severanceYears: number;
+  severancePay: number;
+  gratuityAmount: number;
+  gratuityFrom: Month;           // YYYY-MM
+  gratuityTo: Month;
+  compensationAmount: number;
+  compensationBasis: 'none' | 'fixed_term' | 'no_provision';
+  compensationMonths: number;
+}
+
+export interface FinalDuesContext {
+  employeeName: string;
+  monthlyBasic: number;
+  monthlyPay: number;            // basic + fixed allowances
+  hireDate: string | null;
+  contractStart: string | null;
+  contractEnd: string | null;
+  workingDaysInMonth: number;
+  periodStart: string;
+  periodEnd: string;
+  paymentMonth: Month;
+  exit: { id: string; exit_type: string; last_working_date: string; notice_date: string } | null;
+  leaveDaysRemaining: number | null;
+  saved: FinalDuesInputs | null;
+}
+
+/** Everything needed to pre-fill the final dues form for a payroll line. */
+export async function getFinalDuesContext(lineId: string): Promise<FinalDuesContext> {
+  const { data: line, error: lineErr } = await supabase
+    .from('payroll_lines').select('id, run_id, user_id').eq('id', lineId).single();
+  if (lineErr) throw lineErr;
+  const run = await getPayrollRunById(line.run_id);
+  if (!run) throw new Error('Run not found');
+  const paymentMonth = `${run.pay_period_year}-${String(run.pay_period_month).padStart(2, '0')}`;
+  const periodStart = `${paymentMonth}-01`;
+  const periodEnd = periodEndDate(run.pay_period_year, run.pay_period_month);
+
+  const [profRes, exitRes, savedRes, wdRes] = await Promise.all([
+    supabase.from('users_profile')
+      .select('first_name, last_name, basic_salary, allowances, hire_date, contract_start_date, contract_end_date')
+      .eq('id', line.user_id).single(),
+    supabase.from('exit_requests')
+      .select('id, exit_type, last_working_date, notice_date, status')
+      .eq('user_id', line.user_id).neq('status', 'cancelled')
+      .order('created_at', { ascending: false }).limit(1),
+    supabase.from('final_dues').select('inputs').eq('line_id', lineId).maybeSingle(),
+    run.working_days_in_period
+      ? Promise.resolve({ data: run.working_days_in_period, error: null })
+      : supabase.rpc('count_working_days_in_month', { p_year: run.pay_period_year, p_month: run.pay_period_month }),
+  ]);
+  if (profRes.error) throw profRes.error;
+  const p = profRes.data as Record<string, unknown>;
+  const allowances = Object.values((p.allowances as Record<string, number>) || {}).reduce((s, v) => s + (Number(v) || 0), 0);
+
+  // Untaken annual leave this year
+  let leaveDaysRemaining: number | null = null;
+  const { data: bal } = await supabase
+    .from('leave_balances')
+    .select('annual_allocation, carryforward_days, used_days, pending_days, leave_types(name)')
+    .eq('user_id', line.user_id).eq('year', run.pay_period_year);
+  const annual = (bal || []).find(b => /annual/i.test(String((b as { leave_types?: { name?: string } }).leave_types?.name ?? '')));
+  if (annual) {
+    leaveDaysRemaining = Math.max(0, Number(annual.annual_allocation) + Number(annual.carryforward_days)
+      - Number(annual.used_days) - Number(annual.pending_days));
+  }
+
+  return {
+    employeeName: `${p.first_name ?? ''} ${p.last_name ?? ''}`.trim(),
+    monthlyBasic: Number(p.basic_salary) || 0,
+    monthlyPay: (Number(p.basic_salary) || 0) + allowances,
+    hireDate: (p.hire_date as string) ?? null,
+    contractStart: (p.contract_start_date as string) ?? null,
+    contractEnd: (p.contract_end_date as string) ?? null,
+    workingDaysInMonth: Number(wdRes.data) || 22,
+    periodStart, periodEnd, paymentMonth,
+    exit: exitRes.data?.[0] ?? null,
+    leaveDaysRemaining,
+    saved: (savedRes.data?.inputs as FinalDuesInputs) ?? null,
+  };
+}
+
+/** Work out the final payslip and the tax on terminal lump sums, without saving. */
+export async function previewFinalDues(lineId: string, inp: FinalDuesInputs): Promise<{
+  tax: TerminalTax;
+  line: ComputedPayrollLine;
+  bases: Record<Month, ArrearsBase>;
+  paymentMonth: Month;
+}> {
+  const { data: lineRow, error: lineErr } = await supabase.from('payroll_lines').select('*').eq('id', lineId).single();
+  if (lineErr) throw lineErr;
+  const line = lineRow as PayrollLine & { run_id: string };
+  const run = await getPayrollRunById(line.run_id);
+  if (!run) throw new Error('Run not found');
+  const paymentMonth = `${run.pay_period_year}-${String(run.pay_period_month).padStart(2, '0')}`;
+
+  const { data: emp, error: empErr } = await supabase
+    .from('users_profile').select(PAYROLL_PROFILE_COLUMNS).eq('id', line.user_id).single();
+  if (empErr) throw empErr;
+  const profile = toPayrollProfile(emp as unknown as Record<string, unknown>);
+  const basis: TaxBasis = profile.tax_employment_category === 'secondary' ? 'secondary'
+    : profile.tax_residency === 'non_resident' ? 'non_resident' : 'resident';
+
+  const settings = await getPayrollSettings();
+  const L = taxLimits(settings);
+  const workingDays = run.working_days_in_period ?? 22;
+  const unpaidDays = Math.max(0, workingDays - Math.max(0, inp.daysWorked));
+  const periodEnd = periodEndDate(run.pay_period_year, run.pay_period_month);
+  const otherDeds = (line.other_deductions as Array<{ name: string; amount: number }>) || [];
+
+  const g = splitGratuity(inp.gratuityAmount, inp.gratuityFrom, inp.gratuityTo);
+  const vp: Partial<VariablePayInput> = {
+    overtime_amount: line.overtime_amount || 0, overtime_hours: line.overtime_hours || 0,
+    bonus_amount: line.bonus_amount || 0, acting_allowance: line.acting_allowance || 0,
+    per_diem_amount: line.per_diem_amount || 0, per_diem_days: line.per_diem_days || 0,
+    benefits_in_kind: line.benefits_in_kind || 0,
+    other_variable_pay: (line.other_variable_pay as Array<{ name: string; amount: number }>) || [],
+    court_deduction_amount: line.court_deduction_amount || 0, court_deduction_ref: line.court_deduction_ref || '',
+    arrears_amount: line.arrears_amount || 0, arrears_paye: line.arrears_paye || 0,
+    leave_pay: inp.leavePay, notice_pay: inp.noticePay,
+    severance_pay: inp.severancePay, gratuity_amount: inp.gratuityAmount, gratuity_exempt: g.exempt,
+    compensation_amount: inp.compensationAmount,
+  };
+
+  // This month's ordinary taxable pay (salary to last day + leave + notice)
+  const ordinary = computePayrollLine(profile, settings, otherDeds, unpaidDays, workingDays,
+    { ...vp, severance_pay: 0, gratuity_amount: 0, compensation_amount: 0, terminal_paye: 0 }, { periodEnd });
+
+  // Taxable pay earlier this year (other runs of the same year)
+  const { data: runs, error: runErr } = await supabase
+    .from('payroll_runs').select('id, pay_period_month, status')
+    .eq('pay_period_year', run.pay_period_year).lt('pay_period_month', run.pay_period_month)
+    .not('status', 'in', '(rejected,superseded)');
+  if (runErr) throw runErr;
+  let yearTaxable = ordinary.taxable_income;
+  if ((runs || []).length > 0) {
+    const { data: prior, error } = await supabase.from('payroll_lines').select('taxable_income')
+      .eq('user_id', line.user_id).in('run_id', (runs || []).map(r => r.id));
+    if (error) throw error;
+    yearTaxable += (prior || []).reduce((s, l) => s + (Number(l.taxable_income) || 0), 0);
+  }
+
+  const gMonths = g.taxableFrom && g.taxableTo ? monthsBetween(g.taxableFrom, g.taxableTo) : [];
+  const bases = await loadArrearsBases(line.user_id, gMonths, run.id);
+
+  const tax = terminalTax({
+    paymentMonth, basis, secondaryRate: L.secondary_employment_rate, yearTaxable,
+    severance: inp.severancePay,
+    gratuity: { amount: inp.gratuityAmount, from: inp.gratuityFrom, to: inp.gratuityTo },
+    compensation: { amount: inp.compensationAmount, months: inp.compensationMonths },
+  }, m => bases[m]?.taxable ?? null);
+
+  const finalLine = computePayrollLine(profile, settings, otherDeds, unpaidDays, workingDays,
+    { ...vp, terminal_paye: tax.total }, { periodEnd });
+  return { tax, line: finalLine, bases, paymentMonth };
+}
+
+/** Save final dues on a payroll line and recompute it. */
+export async function saveFinalDues(lineId: string, inp: FinalDuesInputs): Promise<TerminalTax> {
+  if (!inp.lastWorkingDate) throw new Error('Enter the last working day');
+  const { tax } = await previewFinalDues(lineId, inp);
+  if (tax.errors.length) throw new Error(tax.errors.join('; '));
+  if (tax.missing.length) {
+    throw new Error(`Gratuity before Jul 2025 needs the taxable pay originally taxed for: ${tax.missing.join(', ')}. ` +
+      'Load the P9 history for those months, or ask for manual entry.');
+  }
+
+  const { data: line, error: lineErr } = await supabase
+    .from('payroll_lines').select('run_id, user_id').eq('id', lineId).single();
+  if (lineErr) throw lineErr;
+  const { data: { user } } = await supabase.auth.getUser();
+
+  const { error: upErr } = await supabase.from('final_dues').upsert({
+    line_id: lineId, run_id: line.run_id, user_id: line.user_id,
+    exit_request_id: inp.exitRequestId, last_working_date: inp.lastWorkingDate,
+    days_worked: inp.daysWorked, inputs: inp,
+    tax_working: {
+      severanceTax: tax.severanceTax, gratuityTaxable: tax.gratuityTaxable, gratuityExempt: tax.gratuityExempt,
+      gratuityTax: tax.gratuityTax, gratuityMonths: tax.gratuitySpread?.months ?? [],
+      compensationTax: tax.compensationTax, total: tax.total,
+    },
+    terminal_paye: tax.total, created_by: user?.id ?? null, updated_at: new Date().toISOString(),
+  }, { onConflict: 'line_id' });
+  if (upErr) throw upErr;
+
+  const { error: dwErr } = await supabase.from('payroll_lines').update({ days_worked: inp.daysWorked }).eq('id', lineId);
+  if (dwErr) throw dwErr;
+
+  const g = splitGratuity(inp.gratuityAmount, inp.gratuityFrom, inp.gratuityTo);
+  await saveVariablePayForLine(lineId, {
+    leave_pay: inp.leavePay, notice_pay: inp.noticePay, severance_pay: inp.severancePay,
+    gratuity_amount: inp.gratuityAmount, gratuity_exempt: g.exempt,
+    compensation_amount: inp.compensationAmount, terminal_paye: tax.total,
+  });
+
+  // Tick "Final payroll processed" on the exit clearance checklist
+  if (inp.exitRequestId) {
+    const { data: ex } = await supabase.from('exit_requests').select('clearance_items').eq('id', inp.exitRequestId).maybeSingle();
+    const items = (ex?.clearance_items as Array<{ key: string; cleared: boolean }>) || [];
+    if (items.some(i => i.key === 'final_payroll' && !i.cleared)) {
+      await supabase.from('exit_requests').update({
+        clearance_items: items.map(i => (i.key === 'final_payroll' ? { ...i, cleared: true } : i)),
+        updated_at: new Date().toISOString(),
+      }).eq('id', inp.exitRequestId);
+    }
+  }
+  return tax;
+}
+
+/** Remove final dues from a payroll line (back to a normal full month). */
+export async function removeFinalDues(lineId: string): Promise<void> {
+  const { data: line, error } = await supabase.from('payroll_lines').select('run_id').eq('id', lineId).single();
+  if (error) throw error;
+  const run = await getPayrollRunById(line.run_id);
+  const { error: delErr } = await supabase.from('final_dues').delete().eq('line_id', lineId);
+  if (delErr) throw delErr;
+  await supabase.from('payroll_lines').update({ days_worked: run?.working_days_in_period ?? null }).eq('id', lineId);
+  await saveVariablePayForLine(lineId, {
+    leave_pay: 0, notice_pay: 0, severance_pay: 0, gratuity_amount: 0, gratuity_exempt: 0,
+    compensation_amount: 0, terminal_paye: 0,
+  });
 }
 
 
