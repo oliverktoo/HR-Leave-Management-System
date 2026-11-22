@@ -1,6 +1,7 @@
 // Payroll Service — Kenya-law-compliant computation engine + CRUD for runs/lines
 
 import { supabase } from '../lib/supabaseClient';
+import { computeArrearsTax, spreadArrears, type ArrearsEntry, type ArrearsResult, type Month, type TaxBasis } from './arrears';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -64,6 +65,8 @@ export interface VariablePayInput {
   acting_allowance: number;
   per_diem_amount: number;
   per_diem_days: number;       // days away on official duty (tax-free per diem = days × daily limit)
+  arrears_amount: number;      // back pay for earlier months, paid this month
+  arrears_paye: number;        // extra PAYE on the arrears, worked out by spreading back (arrears.ts)
   benefits_in_kind: number;    // non-cash taxable benefits (company car, housing, etc.)
   court_deduction_amount: number;
   court_deduction_ref: string;
@@ -116,6 +119,10 @@ export interface ComputedPayrollLine {
   per_diem_amount: number;
   per_diem_days: number;
   per_diem_exempt: number;        // tax-free part (days × daily limit)
+  arrears_amount: number;         // back pay included in gross pay
+  arrears_paye: number;           // PAYE on the arrears (included in paye_amount)
+  arrears_sha: number;            // SHIF on the arrears (included in sha_amount)
+  arrears_housing_levy: number;   // Housing Levy on the arrears (included in housing_levy_employee)
   other_variable_pay: Array<{ name: string; amount: number }>;
   benefits_in_kind: number;       // non-cash BIK (not cash gross)
   bik_taxable: number;            // BIK added to taxable income (0 when within the annual exemption)
@@ -212,6 +219,10 @@ export interface PayrollLine {
   // Special-case tax detail (migration 077); absent on lines computed before it
   per_diem_days?: number;
   per_diem_exempt?: number;
+  arrears_amount?: number;
+  arrears_paye?: number;
+  arrears_sha?: number;
+  arrears_housing_levy?: number;
   bik_taxable?: number;
   pension_deduction?: number;
   mortgage_interest_deduction?: number;
@@ -477,6 +488,10 @@ export function computePayrollLine(
   const bik               = variablePay.benefits_in_kind   || 0;
   const otherVariablePay  = variablePay.other_variable_pay || [];
   const otherVariableTotal = otherVariablePay.reduce((s, v) => s + v.amount, 0);
+  // Back pay for earlier months: paid in cash now; its PAYE is worked out by
+  // spreading back (arrears.ts) and passed in as arrears_paye.
+  const arrearsAmount     = Math.max(0, variablePay.arrears_amount || 0);
+  const arrearsPaye       = arrearsAmount > 0 ? Math.max(0, variablePay.arrears_paye || 0) : 0;
 
   const fixedGross = profile.basic_salary + allowancesTotal;
 
@@ -487,14 +502,16 @@ export function computePayrollLine(
 
   // Variable pay is NOT prorated (paid for what was earned)
   // gross_pay = cash paid (BIK excluded — not a bank transfer)
-  const grossPay = Math.round(fixedGross * prorationFactor)
+  const currentGross = Math.round(fixedGross * prorationFactor)
     + overtimeAmount + bonusAmount + actingAllowance + perDiemAmount + otherVariableTotal;
+  const grossPay = currentGross + arrearsAmount;
 
   // Per diem (ITA s.5(2)(a)): up to the daily limit × days away on official duty is a
   // reimbursement, not income — excluded from tax and from the NSSF/SHIF/Housing Levy
   // base. Any excess, or per diem with no travel days recorded, is taxable pay.
   const perDiemExempt = Math.min(perDiemAmount, Math.round(perDiemDays * L.per_diem_daily_exempt));
-  const statutoryBase = grossPay - perDiemExempt;
+  // This month's earnings only — arrears are handled separately below
+  const statutoryBase = currentGross - perDiemExempt;
 
   // Benefits in kind: tax-free when the aggregate value is within the annual limit
   // (applied monthly: ≤ limit/12); above it the whole value is taxable.
@@ -502,8 +519,17 @@ export function computePayrollLine(
 
   // NSSF, SHA/SHIF and Housing Levy on cash earnings (BIK and per-diem reimbursement excluded)
   const nssf = computeNSSF(statutoryBase, settings);
-  const sha = computeSHA(statutoryBase, settings);
-  const housing = computeHousingLevy(statutoryBase, settings);
+  const shaCurrent = computeSHA(statutoryBase, settings);
+  const housingCurrent = computeHousingLevy(statutoryBase, settings);
+  // SHIF and Housing Levy are also charged on arrears paid now (NSSF is not recomputed
+  // for past months). Their tax effect is in the spread-back calculation.
+  const shaArrears = Math.round(arrearsAmount * settings.sha_rate);
+  const housingArrears = computeHousingLevy(arrearsAmount, settings);
+  const sha = shaCurrent + shaArrears;
+  const housing = {
+    employee: housingCurrent.employee + housingArrears.employee,
+    employer: housingCurrent.employer + housingArrears.employer,
+  };
 
   // Allowable deductions (Tax Laws (Amendment) Act 2024, effective 27 Dec 2024 — KRA
   // notice 2157). Secondary employment gets none: they are claimed at the main employer.
@@ -513,8 +539,8 @@ export function computePayrollLine(
     : Math.min(Math.max(0, profile.mortgage_interest_monthly || 0), L.mortgage_interest_cap_monthly);
   const prmfDeduction = secondary ? 0
     : Math.min(Math.max(0, profile.post_retirement_medical_monthly || 0), L.prmf_cap_monthly);
-  const shaDeduction = secondary ? 0 : sha;
-  const housingDeduction = secondary ? 0 : housing.employee;
+  const shaDeduction = secondary ? 0 : shaCurrent;
+  const housingDeduction = secondary ? 0 : housingCurrent.employee;
 
   const incomeAfterDeductions = Math.max(0,
     statutoryBase + bikTaxable - pensionDeduction - shaDeduction - housingDeduction - mortgageDeduction - prmfDeduction);
@@ -541,7 +567,7 @@ export function computePayrollLine(
       ? Math.min(Math.round((profile.medical_premium || 0) * L.insurance_relief_rate), L.insurance_relief_cap_monthly)
       : 0;
   }
-  const paye = Math.max(0, payeBeforeRelief - personalRelief - insuranceRelief);
+  const paye = Math.max(0, payeBeforeRelief - personalRelief - insuranceRelief) + arrearsPaye;
 
   // Statutory deductions total
   const statutoryTotal = nssf.employee + sha + housing.employee + paye;
@@ -572,6 +598,10 @@ export function computePayrollLine(
     per_diem_amount:    perDiemAmount,
     per_diem_days:      perDiemDays,
     per_diem_exempt:    perDiemExempt,
+    arrears_amount:     arrearsAmount,
+    arrears_paye:       arrearsPaye,
+    arrears_sha:        shaArrears,
+    arrears_housing_levy: housingArrears.employee,
     benefits_in_kind:   bik,
     bik_taxable:        bikTaxable,
     other_variable_pay: otherVariablePay,
@@ -652,6 +682,10 @@ export function lineToDbFields(c: ComputedPayrollLine) {
     per_diem_amount:        c.per_diem_amount,
     per_diem_days:          c.per_diem_days,
     per_diem_exempt:        c.per_diem_exempt,
+    arrears_amount:         c.arrears_amount,
+    arrears_paye:           c.arrears_paye,
+    arrears_sha:            c.arrears_sha,
+    arrears_housing_levy:   c.arrears_housing_levy,
     benefits_in_kind:       c.benefits_in_kind,
     bik_taxable:            c.bik_taxable,
     other_variable_pay:     c.other_variable_pay,
@@ -842,7 +876,7 @@ export async function computeAndSaveRun(runId: string): Promise<{
     supabase.rpc('get_payroll_absence_days', { p_year: year, p_month: month }),
     supabase
       .from('payroll_lines')
-      .select('user_id, overtime_amount, overtime_hours, bonus_amount, acting_allowance, per_diem_amount, per_diem_days, benefits_in_kind, other_variable_pay, court_deduction_amount, court_deduction_ref')
+      .select('user_id, overtime_amount, overtime_hours, bonus_amount, acting_allowance, per_diem_amount, per_diem_days, arrears_amount, arrears_paye, benefits_in_kind, other_variable_pay, court_deduction_amount, court_deduction_ref')
       .eq('run_id', runId),
   ]);
 
@@ -869,6 +903,8 @@ export async function computeAndSaveRun(runId: string): Promise<{
       acting_allowance:       row.acting_allowance       || 0,
       per_diem_amount:        row.per_diem_amount        || 0,
       per_diem_days:          row.per_diem_days          || 0,
+      arrears_amount:         row.arrears_amount         || 0,
+      arrears_paye:           row.arrears_paye           || 0,
       benefits_in_kind:       row.benefits_in_kind       || 0,
       other_variable_pay:     row.other_variable_pay     || [],
       court_deduction_amount: row.court_deduction_amount || 0,
@@ -1264,13 +1300,14 @@ function taxComputationHtml(line: PayrollLine, kes: (n: number) => string): stri
   const n = (v: number | undefined | null) => Number(v) || 0;
   const rows = [
     row('Gross pay', line.gross_pay),
+    n(line.arrears_amount) > 0 ? row('Less: salary arrears (taxed separately, below)', n(line.arrears_amount), '− ') : '',
     n(line.per_diem_exempt) > 0 ? row('Less: tax-free per diem', n(line.per_diem_exempt), '− ') : '',
     n(line.bik_taxable) > 0 ? row('Add: taxable benefits in kind', n(line.bik_taxable), '+ ') : '',
     n(line.benefits_in_kind) > 0 && n(line.bik_taxable) === 0
       ? `<tr><td colspan="2" style="color:#6b7280">Benefits in kind ${kes(n(line.benefits_in_kind))} — within the tax-free limit</td></tr>` : '',
     !secondary && n(line.pension_deduction) > 0 ? row('Less: pension (NSSF + registered scheme)', n(line.pension_deduction), '− ') : '',
-    !secondary ? row('Less: SHIF', line.sha_amount, '− ') : '',
-    !secondary ? row('Less: Housing Levy', line.housing_levy_employee, '− ') : '',
+    !secondary ? row('Less: SHIF', line.sha_amount - n(line.arrears_sha), '− ') : '',
+    !secondary ? row('Less: Housing Levy', line.housing_levy_employee - n(line.arrears_housing_levy), '− ') : '',
     n(line.mortgage_interest_deduction) > 0 ? row('Less: mortgage interest', n(line.mortgage_interest_deduction), '− ') : '',
     n(line.prmf_deduction) > 0 ? row('Less: post-retirement medical fund', n(line.prmf_deduction), '− ') : '',
     n(line.disability_exemption) > 0 ? row('Less: disability exemption', n(line.disability_exemption), '− ') : '',
@@ -1278,6 +1315,7 @@ function taxComputationHtml(line: PayrollLine, kes: (n: number) => string): stri
     row(secondary ? 'PAYE at secondary-employment rate' : 'Tax on taxable income', line.paye_before_relief),
     n(line.personal_relief) > 0 ? row('Less: personal relief', n(line.personal_relief), '− ') : '',
     n(line.insurance_relief) > 0 ? row('Less: insurance relief', n(line.insurance_relief), '− ') : '',
+    n(line.arrears_paye) > 0 ? row('Add: PAYE on salary arrears (spread back to the months earned)', n(line.arrears_paye), '+ ') : '',
     row('PAYE', line.paye_amount, '', true),
   ].join('');
   const basis = secondary ? 'Secondary employment — reliefs claimed at main employer'
@@ -1308,6 +1346,7 @@ export function generatePayslipHtml(line: PayrollLine, run: PayslipPeriod): stri
     line.acting_allowance > 0 ? `<tr><td>Acting Allowance</td><td class="num">${kes(line.acting_allowance)}</td></tr>` : '',
     line.per_diem_amount  > 0 ? `<tr><td>Per Diem${(line.per_diem_exempt || 0) > 0
       ? ` <span style="font-size:10px;color:#6b7280">(${kes(line.per_diem_exempt || 0)} tax-free · ${line.per_diem_days || 0} day${line.per_diem_days === 1 ? '' : 's'})</span>` : ''}</td><td class="num">${kes(line.per_diem_amount)}</td></tr>` : '',
+    (line.arrears_amount || 0) > 0 ? `<tr><td>Salary arrears <span style="font-size:10px;color:#6b7280">(back pay for earlier months)</span></td><td class="num">${kes(line.arrears_amount || 0)}</td></tr>` : '',
     // Benefits in kind are not cash pay — shown under Tax computation, not Earnings
     ...(line.other_variable_pay || []).map((v: { name: string; amount: number }) =>
       `<tr><td>${v.name}</td><td class="num">${kes(v.amount)}</td></tr>`
@@ -1471,13 +1510,20 @@ export async function saveVariablePayForLine(
   const workingDays = run.working_days_in_period ?? 22;
   const unpaidDays = workingDays - (line.days_worked ?? workingDays);
 
+  // Keep arrears already on the line unless this save sets them
+  const withArrears: Partial<VariablePayInput> = {
+    arrears_amount: line.arrears_amount || 0,
+    arrears_paye:   line.arrears_paye   || 0,
+    ...variablePay,
+  };
+
   const computed = computePayrollLine(
     toPayrollProfile(emp),
     settings,
     (line.other_deductions as Array<{ name: string; amount: number }>) || [],
     unpaidDays,
     workingDays,
-    variablePay,
+    withArrears,
     { periodEnd: periodEndDate(run.pay_period_year, run.pay_period_month) }
   );
 
@@ -1517,6 +1563,179 @@ export async function saveVariablePayForLine(
 }
 
 // ─── Ghost worker check ───────────────────────────────────────────────────────
+
+// ─── Salary arrears (migration 078) ──────────────────────────────────────────
+
+export interface ArrearsBase { taxable: number; source: 'payroll' | 'p9' | 'manual' }
+
+export interface SavedArrearsEntry extends ArrearsEntry {
+  id: string;
+  extra_paye: number;
+}
+
+/**
+ * Taxable pay originally taxed for an employee in the given months: from saved
+ * payroll runs first, then from imported P9 history. Months not found are absent.
+ */
+export async function loadArrearsBases(
+  userId: string,
+  months: Month[],
+  excludeRunId?: string,
+): Promise<Record<Month, ArrearsBase>> {
+  const out: Record<Month, ArrearsBase> = {};
+  if (months.length === 0) return out;
+
+  // 1. Saved payroll runs
+  const { data: runs, error: runErr } = await supabase
+    .from('payroll_runs')
+    .select('id, pay_period_year, pay_period_month, status')
+    .not('status', 'in', '(rejected,superseded)');
+  if (runErr) throw runErr;
+  const runMonth = new Map<string, Month>();
+  for (const r of runs || []) {
+    if (r.id === excludeRunId) continue;
+    const m = `${r.pay_period_year}-${String(r.pay_period_month).padStart(2, '0')}`;
+    if (months.includes(m)) runMonth.set(r.id, m);
+  }
+  if (runMonth.size > 0) {
+    const { data: lines, error } = await supabase
+      .from('payroll_lines')
+      .select('run_id, taxable_income')
+      .eq('user_id', userId)
+      .in('run_id', [...runMonth.keys()]);
+    if (error) throw error;
+    for (const l of lines || []) {
+      const m = runMonth.get(l.run_id);
+      if (m) out[m] = { taxable: Number(l.taxable_income) || 0, source: 'payroll' };
+    }
+  }
+
+  // 2. Imported P9 history for months still unknown
+  const remaining = months.filter(m => !out[m]);
+  if (remaining.length > 0) {
+    const { data: emp } = await supabase
+      .from('users_profile').select('employee_id, kra_pin').eq('id', userId).maybeSingle();
+    const years = [...new Set(remaining.map(m => Number(m.slice(0, 4))))];
+    const { data: imports, error } = await supabase
+      .from('p9_historical_imports').select('year, data').in('year', years);
+    if (error) throw error;
+    const pin = (emp?.kra_pin || '').trim().toUpperCase();
+    for (const imp of imports || []) {
+      const rows = (imp.data || []) as Array<{ employee_id?: string; kra_pin?: string;
+        monthly?: Array<{ month: number; taxable_income: number }> }>;
+      const person = rows.find(r => (emp?.employee_id && r.employee_id === emp.employee_id)
+        || (pin && (r.kra_pin || '').trim().toUpperCase() === pin));
+      for (const mm of person?.monthly || []) {
+        const m = `${imp.year}-${String(mm.month).padStart(2, '0')}`;
+        if (remaining.includes(m) && !out[m]) out[m] = { taxable: Number(mm.taxable_income) || 0, source: 'p9' };
+      }
+    }
+  }
+  return out;
+}
+
+/** Work out the extra PAYE on arrears for a payroll line, without saving. */
+export async function previewArrearsForLine(
+  lineId: string,
+  entries: ArrearsEntry[],
+  manualBases: Record<Month, number> = {},
+): Promise<{ result: ArrearsResult; bases: Record<Month, ArrearsBase>; paymentMonth: Month }> {
+  const { data: line, error: lineErr } = await supabase
+    .from('payroll_lines').select('id, run_id, user_id').eq('id', lineId).single();
+  if (lineErr) throw lineErr;
+  const run = await getPayrollRunById(line.run_id);
+  if (!run) throw new Error('Run not found');
+  const paymentMonth = `${run.pay_period_year}-${String(run.pay_period_month).padStart(2, '0')}`;
+
+  const { data: prof, error: profErr } = await supabase
+    .from('users_profile').select('tax_residency, tax_employment_category').eq('id', line.user_id).single();
+  if (profErr) throw profErr;
+  const basis: TaxBasis = prof.tax_employment_category === 'secondary' ? 'secondary'
+    : prof.tax_residency === 'non_resident' ? 'non_resident' : 'resident';
+
+  const settings = await getPayrollSettings();
+  const L = taxLimits(settings);
+  const { shares } = spreadArrears(entries, paymentMonth);
+  const bases = await loadArrearsBases(line.user_id, [...shares.keys()], run.id);
+  for (const [m, v] of Object.entries(manualBases)) {
+    if (Number.isFinite(v) && !bases[m]) bases[m] = { taxable: v, source: 'manual' };
+  }
+
+  const result = computeArrearsTax(entries, m => bases[m]?.taxable ?? null, {
+    paymentMonth, basis,
+    secondaryRate: L.secondary_employment_rate,
+    shaRate: settings.sha_rate,
+    housingLevyRate: settings.housing_levy_employee_rate,
+  });
+  return { result, bases, paymentMonth };
+}
+
+/** Arrears entries saved on a payroll line. */
+export async function getArrearsForLine(lineId: string): Promise<SavedArrearsEntry[]> {
+  const { data, error } = await supabase
+    .from('payroll_arrears')
+    .select('id, description, amount, from_month, to_month, extra_paye')
+    .eq('line_id', lineId)
+    .order('created_at');
+  if (error) throw error;
+  return (data || []).map(r => ({
+    id: r.id, description: r.description, amount: Number(r.amount),
+    from: String(r.from_month).slice(0, 7), to: String(r.to_month).slice(0, 7),
+    extra_paye: Number(r.extra_paye),
+  }));
+}
+
+/**
+ * Save arrears on a payroll line (replaces any saved before) and recompute the
+ * line. Pass an empty list to remove arrears.
+ */
+export async function saveArrearsForLine(
+  lineId: string,
+  entries: ArrearsEntry[],
+  manualBases: Record<Month, number> = {},
+): Promise<ArrearsResult> {
+  const { result, bases } = await previewArrearsForLine(lineId, entries, manualBases);
+  if (result.errors.length) throw new Error(result.errors.join('; '));
+  if (result.missing.length) {
+    throw new Error(`Enter the taxable pay originally taxed for: ${result.missing.join(', ')}`);
+  }
+
+  const { data: line, error: lineErr } = await supabase
+    .from('payroll_lines').select('run_id, user_id').eq('id', lineId).single();
+  if (lineErr) throw lineErr;
+  const { data: { user } } = await supabase.auth.getUser();
+
+  const { error: delErr } = await supabase.from('payroll_arrears').delete().eq('line_id', lineId);
+  if (delErr) throw delErr;
+
+  if (entries.length > 0) {
+    // Split the extra PAYE across entries by amount, for the record
+    let allocated = 0;
+    const rows = entries.map((e, i) => {
+      const share = i === entries.length - 1
+        ? result.extraPaye - allocated
+        : Math.round(result.extraPaye * (e.amount / result.totalArrears));
+      allocated += share;
+      return {
+        run_id: line.run_id, line_id: lineId, user_id: line.user_id,
+        description: e.description.trim() || 'Salary arrears',
+        amount: e.amount, from_month: `${e.from}-01`, to_month: `${e.to}-01`,
+        breakdown: result.months.map(m => ({ ...m, source: bases[m.month]?.source ?? null })),
+        extra_paye: share,
+        created_by: user?.id ?? null,
+      };
+    });
+    const { error: insErr } = await supabase.from('payroll_arrears').insert(rows);
+    if (insErr) throw insErr;
+  }
+
+  await saveVariablePayForLine(lineId, {
+    arrears_amount: result.totalArrears,
+    arrears_paye: result.extraPaye,
+  });
+  return result;
+}
+
 
 export async function getGhostWorkerCheck(): Promise<Array<{
   id: string; employee_id: string; full_name: string;

@@ -26,7 +26,7 @@ const release = (uid: string, runId: string, on: boolean) => asUser(db, uid, (tx
 beforeAll(async () => {
   db = await createLeaveDb(['021_ooo_requests.sql', '030_payroll_foundation.sql', '031_payroll_approval_roles.sql',
     '032_payroll_leave_integration.sql', '057_payroll_sop_compliance.sql', '058_payroll_gap_fixes.sql',
-    '076_payslip_release.sql', '077_payroll_special_cases.sql']);
+    '076_payslip_release.sql', '077_payroll_special_cases.sql', '078_salary_arrears.sql']);
   hr = await addUser(db, 'hr_admin');
   emp1 = await addUser(db, 'employee');
   emp2 = await addUser(db, 'employee');
@@ -130,5 +130,34 @@ describe('077 special cases schema', () => {
     await expect(asUser(db, emp1, (tx) =>
       tx.query(`UPDATE users_profile SET disability_exemption_cert_no = 'FAKE' WHERE id = $1`, [emp1])))
       .rejects.toThrow(/disability_exemption_cert_no/);
+  });
+});
+
+describe('078 salary arrears records', () => {
+  let lineId = '';
+  beforeAll(async () => {
+    const { rows } = await db.query<{ id: string }>(`SELECT id FROM payroll_lines WHERE run_id = $1 AND user_id = $2`, [approvedRun, emp1]);
+    lineId = rows[0].id;
+  });
+  const insertAs = (uid: string) => asUser(db, uid, (tx) => tx.query(
+    `INSERT INTO payroll_arrears (run_id, line_id, user_id, description, amount, from_month, to_month, breakdown, extra_paye)
+     VALUES ($1, $2, $3, 'Increment', 30000, '2026-07-01', '2026-09-01', '[]', 8619)`, [approvedRun, lineId, emp1]));
+
+  test('HR can record arrears; finance can read them', async () => {
+    await insertAs(hr);
+    const { rows } = await asUser(db, finance, (tx) => tx.query(`SELECT amount FROM payroll_arrears`));
+    expect(rows).toHaveLength(1);
+  });
+
+  test('employees cannot read or write arrears records', async () => {
+    const { rows } = await asUser(db, emp1, (tx) => tx.query(`SELECT * FROM payroll_arrears`));
+    expect(rows).toEqual([]);
+    await expect(insertAs(emp1)).rejects.toThrow(/row-level security/);
+  });
+
+  test('a period that ends before it starts is rejected', async () => {
+    await expect(db.query(
+      `INSERT INTO payroll_arrears (run_id, line_id, user_id, description, amount, from_month, to_month, breakdown)
+       VALUES ($1, $2, $3, 'X', 100, '2026-09-01', '2026-07-01', '[]')`, [approvedRun, lineId, emp1])).rejects.toThrow(/check/i);
   });
 });

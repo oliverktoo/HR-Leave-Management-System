@@ -282,3 +282,25 @@ describe('secondary employment', () => {
     expect(l.net_pay).toBe(100_000 - (10_250 + 35_000) - 10_000);
   });
 });
+
+describe('salary arrears on a payslip line', () => {
+  test('arrears are paid in cash now; SHIF and Housing Levy charged on them; PAYE from the spread-back', () => {
+    // arrears 30,000 for Jul–Sep 2026; spread-back PAYE 8,619 (see arrears.test.ts)
+    const l = computePayrollLine(employee({ basic_salary: 100_000 }), SETTINGS, [], 0, 22,
+      { arrears_amount: 30_000, arrears_paye: 8_619 }, PERIOD);
+    expect(l.gross_pay).toBe(130_000);
+    expect(l.nssf_tier1 + l.nssf_tier2).toBe(6_000);      // not recomputed for past months
+    expect(l.sha_amount).toBe(3_575);                     // 2,750 + 825
+    expect(l.housing_levy_employee).toBe(1_950);          // 1,500 + 450
+    expect([l.arrears_sha, l.arrears_housing_levy]).toEqual([825, 450]);
+    expect(l.taxable_income).toBe(89_750);                // this month only
+    expect(l.arrears_paye).toBe(8_619);
+    expect(l.paye_amount).toBe(27_927);                   // 19,308 + 8,619
+    expect(l.net_pay).toBe(90_548);
+  });
+
+  test('no arrears amount → arrears PAYE ignored', () => {
+    const l = computePayrollLine(employee({ basic_salary: 100_000 }), SETTINGS, [], 0, 22, { arrears_paye: 5_000 }, PERIOD);
+    expect(l.paye_amount).toBe(19_308);
+  });
+});

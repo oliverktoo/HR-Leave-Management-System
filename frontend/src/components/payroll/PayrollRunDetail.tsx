@@ -24,6 +24,7 @@ import {
 import { useAuth } from '../../hooks/useAuth';
 import { AdminSidebar } from '../admin/AdminSidebar';
 import NotificationBell from '../notifications/NotificationBell';
+import { ArrearsModal } from './ArrearsModal';
 
 // ─── Status flow ───────────────────────────────────────────────────────────────
 
@@ -312,6 +313,7 @@ export function PayrollRunDetail() {
   // Modals
   const [confirmAction,    setConfirmAction]    = useState<ApprovalAction | null>(null);
   const [editVarPayLine,   setEditVarPayLine]   = useState<PayrollLine | null>(null);
+  const [arrearsLine,      setArrearsLine]      = useState<PayrollLine | null>(null);
   const [markRemittance,   setMarkRemittance]   = useState<PayrollRemittance | null>(null);
   const [showRevisionModal, setShowRevisionModal] = useState(false);
 
@@ -631,6 +633,12 @@ export function PayrollRunDetail() {
                               Variable Pay
                             </button>
                           )}
+                          {isDraft && isHrAdmin && (
+                            <button className="btn btn-sm btn-outline" onClick={() => setArrearsLine(line)}
+                              title="Back pay for earlier months">
+                              Arrears{(line.arrears_amount || 0) > 0 ? ' ✓' : ''}
+                            </button>
+                          )}
                           <button className="btn btn-sm btn-outline"
                             onClick={() => openPayslip(line, run)}
                             title="View payslip">
@@ -725,6 +733,14 @@ export function PayrollRunDetail() {
           line={editVarPayLine}
           onSave={handleSaveVariablePay}
           onClose={() => setEditVarPayLine(null)}
+        />
+      )}
+
+      {arrearsLine && (
+        <ArrearsModal
+          line={arrearsLine}
+          onSaved={load}
+          onClose={() => setArrearsLine(null)}
         />
       )}
 
