@@ -26,6 +26,7 @@ import {
   type RunExclusion,
 } from '../../services/payrollService';
 import { RemoveLineModal } from './RemoveLineModal';
+import { AttendanceModal } from './AttendanceModal';
 import { useAuth } from '../../hooks/useAuth';
 import { AdminSidebar } from '../admin/AdminSidebar';
 import NotificationBell from '../notifications/NotificationBell';
@@ -322,6 +323,7 @@ export function PayrollRunDetail() {
   const [arrearsLine,      setArrearsLine]      = useState<PayrollLine | null>(null);
   const [finalDuesLine,    setFinalDuesLine]    = useState<PayrollLine | null>(null);
   const [removeLine,       setRemoveLine]       = useState<PayrollLine | null>(null);
+  const [attendanceLine,   setAttendanceLine]   = useState<PayrollLine | null>(null);
   const [exclusions,       setExclusions]       = useState<RunExclusion[]>([]);
   const [markRemittance,   setMarkRemittance]   = useState<PayrollRemittance | null>(null);
   const [showRevisionModal, setShowRevisionModal] = useState(false);
@@ -449,6 +451,9 @@ export function PayrollRunDetail() {
     (l.overtime_amount || 0) > 0 || (l.bonus_amount || 0) > 0 ||
     (l.acting_allowance || 0) > 0 || (l.per_diem_amount || 0) > 0
   );
+
+  const hasAttendance = lines.some(l => l.att_tracked != null);
+  const flaggedLines = lines.filter(l => (Number(l.att_unexplained_days) || 0) > 0);
 
   const today = new Date().toISOString().split('T')[0];
   const pendingRemittances  = remittances.filter(r => r.status !== 'remitted');
@@ -589,6 +594,15 @@ export function PayrollRunDetail() {
           </div>
         )}
 
+        {/* ── Unexplained absences to review (draft mode) ── */}
+        {isDraft && flaggedLines.length > 0 && (
+          <div style={{ background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 8, padding: '0.75rem 1rem', marginBottom: '1.25rem', fontSize: '0.85rem', color: '#92400e' }}>
+            <strong>Attendance:</strong> {flaggedLines.length} employee{flaggedLines.length === 1 ? ' has' : 's have'} scheduled
+            working days with no clock-in, leave or OOO. Click the amber attendance figure on each line to review.
+            Pay only changes if you mark days unpaid.
+          </div>
+        )}
+
         {/* ── Employee payroll lines ── */}
         <div className="card" style={{ marginBottom: '1.5rem' }}>
           <div className="card-header" style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
@@ -601,6 +615,7 @@ export function PayrollRunDetail() {
               <thead>
                 <tr>
                   <th>Employee</th>
+                  {hasAttendance && <th style={{ whiteSpace: 'nowrap' }} title="Days present / scheduled · hours clocked">Attendance</th>}
                   <th style={NUM_CELL}>Basic</th>
                   {hasVariablePay && <th style={NUM_CELL}>Variable</th>}
                   <th style={NUM_CELL}>Gross</th>
@@ -640,6 +655,32 @@ export function PayrollRunDetail() {
                           </div>
                         )}
                       </td>
+                      {hasAttendance && (
+                        <td style={{ whiteSpace: 'nowrap', fontSize: '0.8rem' }}>
+                          {line.att_tracked == null ? <span style={{ color: '#94a3b8' }}>—</span>
+                            : !line.att_tracked ? <span style={{ color: '#94a3b8' }} title="This employee does not clock in">Not tracked</span>
+                            : (
+                              <button type="button" onClick={() => setAttendanceLine(line)}
+                                title="View attendance"
+                                style={{
+                                  background: 'none', border: 'none', padding: 0, cursor: 'pointer', textAlign: 'left',
+                                  color: (Number(line.att_unexplained_days) || 0) > 0 ? '#b45309' : '#334155',
+                                  fontVariantNumeric: 'tabular-nums',
+                                }}>
+                                {Number(line.att_present_days) || 0}/{Number(line.att_scheduled_days) || 0} d · {Math.round((Number(line.att_hours_clocked) || 0) * 10) / 10} h
+                                {(Number(line.att_unexplained_days) || 0) > 0 && (
+                                  <div style={{ fontWeight: 600 }}>
+                                    ⚠ {Number(line.att_unexplained_days)} unexplained
+                                    {(Number(line.att_unpaid_days) || 0) > 0 && ` · ${Number(line.att_unpaid_days)} unpaid`}
+                                  </div>
+                                )}
+                              </button>
+                            )}
+                          {(Number(line.pre_hire_days) || 0) > 0 && (
+                            <div style={{ color: '#64748b' }}>Joined mid-month: {Number(line.pre_hire_days)} d unpaid</div>
+                          )}
+                        </td>
+                      )}
                       <td style={NUM_CELL}>{formatKES(line.basic_salary)}</td>
                       {hasVariablePay && (
                         <td style={{ ...NUM_CELL, color: variableTotal > 0 ? '#059669' : '#94a3b8', fontSize: '0.85rem' }}>
@@ -829,6 +870,15 @@ export function PayrollRunDetail() {
           line={finalDuesLine}
           onSaved={load}
           onClose={() => setFinalDuesLine(null)}
+        />
+      )}
+
+      {attendanceLine && (
+        <AttendanceModal
+          line={attendanceLine}
+          canEdit={isDraft && isHrAdmin}
+          onSaved={load}
+          onClose={() => setAttendanceLine(null)}
         />
       )}
 

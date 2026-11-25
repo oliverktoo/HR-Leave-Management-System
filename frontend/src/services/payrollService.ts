@@ -42,6 +42,7 @@ export interface EmployeePayrollProfile {
   salary_grade: string | null;
   payroll_active: boolean;
   is_active?: boolean;   // staff account active (login); separate from payroll_active
+  attendance_tracked?: boolean;  // false = does not clock in (084)
   // Tax circumstances (migration 077)
   tax_residency?: 'resident' | 'non_resident' | null;
   tax_employment_category?: 'primary' | 'secondary' | null;
@@ -282,6 +283,17 @@ export interface PayrollLine {
   days_worked: number | null;
   leave_days: number;
   ooo_days: number;
+  // Attendance snapshot (084); null on lines computed before it
+  pre_hire_days?: number;
+  att_tracked?: boolean | null;
+  att_scheduled_days?: number | null;
+  att_present_days?: number | null;
+  att_hours_clocked?: number | null;
+  att_hours_expected?: number | null;
+  att_unexplained_days?: number | null;
+  att_unexplained_dates?: string[] | null;
+  att_unpaid_days?: number;
+  att_unpaid_reason?: string | null;
   created_at: string;
   updated_at: string;
   // Joined
@@ -911,6 +923,43 @@ interface AbsenceRow {
   unpaid_days: number;
 }
 
+/** One employee's month from get_payroll_attendance (084). */
+export interface AttendanceRow {
+  user_id: string;
+  tracked: boolean;
+  pre_hire_days: number;
+  scheduled_days: number;
+  present_days: number;
+  hours_clocked: number;
+  expected_hours: number;
+  unexplained_days: number;
+  unexplained_dates: string[];
+}
+
+/**
+ * Paid days for a payroll line.
+ *  unpaid = unpaid leave/OOO + days before the hire date + unexplained absences HR marked unpaid
+ * HR's choice is kept across recomputes but capped at today's unexplained days
+ * (a corrected clock-in shrinks it). A leaver's final-dues days worked wins outright.
+ */
+export function payrollDays(input: {
+  workingDays: number;
+  unpaidLeaveDays: number;
+  preHireDays: number;
+  unexplainedDays: number;
+  attUnpaidDays: number;
+  finalDuesDaysWorked?: number | null;
+}): { unpaidDays: number; daysWorked: number; attUnpaidDays: number } {
+  const working = Math.max(0, input.workingDays);
+  const attUnpaidDays = Math.max(0, Math.min(input.attUnpaidDays, input.unexplainedDays));
+  if (input.finalDuesDaysWorked != null) {
+    const daysWorked = Math.max(0, Math.min(working, input.finalDuesDaysWorked));
+    return { unpaidDays: working - daysWorked, daysWorked, attUnpaidDays };
+  }
+  const unpaidDays = Math.min(working, Math.max(0, input.unpaidLeaveDays + input.preHireDays + attUnpaidDays));
+  return { unpaidDays, daysWorked: working - unpaidDays, attUnpaidDays };
+}
+
 // ─── Compute & save an entire run ────────────────────────────────────────────
 
 export async function computeAndSaveRun(runId: string): Promise<{
@@ -925,7 +974,7 @@ export async function computeAndSaveRun(runId: string): Promise<{
   const month = run.pay_period_month;
 
   // Load settings, active employees, working days, absence data, and existing lines in parallel
-  const [settings, empResult, wdResult, absenceResult, existingLinesResult, exclusionsResult] = await Promise.all([
+  const [settings, empResult, wdResult, absenceResult, existingLinesResult, exclusionsResult, attendanceResult, finalDuesResult] = await Promise.all([
     getPayrollSettings(),
     supabase
       .from('users_profile')
@@ -938,14 +987,24 @@ export async function computeAndSaveRun(runId: string): Promise<{
       .from('payroll_lines')
       .select('user_id, overtime_amount, overtime_hours, bonus_amount, acting_allowance, per_diem_amount, per_diem_days, arrears_amount, arrears_paye, ' +
         'leave_pay, notice_pay, severance_pay, gratuity_amount, gratuity_exempt, compensation_amount, terminal_paye, ' +
-        'benefits_in_kind, other_variable_pay, court_deduction_amount, court_deduction_ref')
+        'benefits_in_kind, other_variable_pay, court_deduction_amount, court_deduction_ref, att_unpaid_days, att_unpaid_reason')
       .eq('run_id', runId),
     // Employees HR removed from this run ("skip this month") stay out on recompute
     supabase.from('payroll_run_exclusions').select('user_id').eq('run_id', runId),
+    supabase.rpc('get_payroll_attendance', { p_year: year, p_month: month }),
+    // Leavers: the days worked entered with their final dues
+    supabase.from('final_dues').select('user_id, days_worked').eq('run_id', runId),
   ]);
 
   if (empResult.error) throw empResult.error;
   if (exclusionsResult.error) throw exclusionsResult.error;
+  if (attendanceResult.error) throw attendanceResult.error;
+  if (finalDuesResult.error) throw finalDuesResult.error;
+  const attendanceMap = new Map(((attendanceResult.data as AttendanceRow[]) || []).map(a => [a.user_id, a]));
+  const finalDuesDays = new Map(((finalDuesResult.data as Array<{ user_id: string; days_worked: number }>) || [])
+    .map(f => [f.user_id, Number(f.days_worked)]));
+  const existingAtt = new Map(((existingLinesResult.data || []) as unknown as Array<Record<string, unknown>>)
+    .map(r => [r.user_id as string, { days: Number(r.att_unpaid_days) || 0, reason: (r.att_unpaid_reason as string) ?? null }]));
   const excluded = new Set(((exclusionsResult.data as Array<{ user_id: string }>) || []).map(r => r.user_id));
   // Without these, a recompute would silently wipe overtime/bonuses already entered
   if (existingLinesResult.error) throw existingLinesResult.error;
@@ -981,29 +1040,54 @@ export async function computeAndSaveRun(runId: string): Promise<{
 
   const employees = ((empResult.data as unknown as Array<Record<string, unknown>>) || [])
     .filter(emp => !excluded.has(emp.id as string));
+  const days = new Map(employees.map(emp => {
+    const uid = emp.id as string;
+    const att = attendanceMap.get(uid);
+    return [uid, payrollDays({
+      workingDays:         workingDaysInMonth,
+      unpaidLeaveDays:     Number(absenceMap[uid]?.unpaid_days) || 0,
+      preHireDays:         Number(att?.pre_hire_days) || 0,
+      unexplainedDays:     Number(att?.unexplained_days) || 0,
+      attUnpaidDays:       existingAtt.get(uid)?.days ?? 0,
+      finalDuesDaysWorked: finalDuesDays.get(uid) ?? null,
+    })];
+  }));
+
   const computed = employees.map(emp => {
-    const absence = absenceMap[emp.id as string];
-    const unpaidDays = absence?.unpaid_days ?? 0;
     const varPay = existingVarPayMap[emp.id as string] ?? {};
     return computePayrollLine(
       toPayrollProfile(emp),
       settings,
       [],
-      unpaidDays,
+      days.get(emp.id as string)!.unpaidDays,
       workingDaysInMonth,
       varPay,
       { periodEnd: periodEndDate(year, month) }
     );
   });
 
-  // Store leave/ooo days on lines
+  // Store leave/ooo days and the attendance snapshot on lines
   const linesWithAbsence = computed.map(line => {
     const absence = absenceMap[line.user_id];
+    const att = attendanceMap.get(line.user_id);
+    const d = days.get(line.user_id)!;
     return {
       ...line,
       _leave_days: absence?.leave_days ?? 0,
       _ooo_days:   absence?.ooo_days   ?? 0,
-      _days_worked: workingDaysInMonth - (absence?.unpaid_days ?? 0),
+      _days_worked: d.daysWorked,
+      _attendance: {
+        pre_hire_days:         Number(att?.pre_hire_days) || 0,
+        att_tracked:           att ? att.tracked : null,
+        att_scheduled_days:    att ? Number(att.scheduled_days) : null,
+        att_present_days:      att ? Number(att.present_days) : null,
+        att_hours_clocked:     att ? Number(att.hours_clocked) : null,
+        att_hours_expected:    att ? Number(att.expected_hours) : null,
+        att_unexplained_days:  att ? Number(att.unexplained_days) : null,
+        att_unexplained_dates: att?.unexplained_dates ?? [],
+        att_unpaid_days:       d.attUnpaidDays,
+        att_unpaid_reason:     d.attUnpaidDays > 0 ? existingAtt.get(line.user_id)?.reason ?? null : null,
+      },
     };
   });
 
@@ -1032,9 +1116,18 @@ export async function computeAndSaveRun(runId: string): Promise<{
   return { linesCount: computed.length, totals };
 }
 
+/** Columns written with the attendance snapshot (also checked by the schema test). */
+export const ATTENDANCE_LINE_COLUMNS = [
+  'pre_hire_days', 'att_tracked', 'att_scheduled_days', 'att_present_days', 'att_hours_clocked',
+  'att_hours_expected', 'att_unexplained_days', 'att_unexplained_dates', 'att_unpaid_days', 'att_unpaid_reason',
+] as const;
+
 async function upsertPayrollLinesWithAbsence(
   runId: string,
-  lines: Array<ComputedPayrollLine & { _leave_days: number; _ooo_days: number; _days_worked: number }>
+  lines: Array<ComputedPayrollLine & {
+    _leave_days: number; _ooo_days: number; _days_worked: number;
+    _attendance: Record<(typeof ATTENDANCE_LINE_COLUMNS)[number], unknown>;
+  }>
 ): Promise<void> {
   const rows = lines.map(l => ({
     run_id: runId,
@@ -1046,12 +1139,37 @@ async function upsertPayrollLinesWithAbsence(
     days_worked: l._days_worked,
     leave_days: l._leave_days,
     ooo_days: l._ooo_days,
+    ...l._attendance,
   }));
 
   const { error } = await supabase
     .from('payroll_lines')
     .upsert(rows, { onConflict: 'run_id,user_id' });
   if (error) throw error;
+}
+
+// ─── Attendance: unexplained absences HR marks unpaid ────────────────────────
+
+const fmtHours = (h: number) => (Math.round(h * 10) / 10).toLocaleString('en-KE', { maximumFractionDigits: 1 });
+
+/** Payslip cells: days present and hours clocked (only for staff who clock in). */
+export function attendancePayslipCells(line: PayrollLine): string {
+  if (!line.att_tracked || line.att_scheduled_days == null) return '';
+  const present = Number(line.att_present_days) || 0;
+  const hours = Number(line.att_hours_clocked) || 0;
+  const expected = Number(line.att_hours_expected) || 0;
+  return `
+  <div><div class="label">Days Present</div><div class="value">${present} / ${Number(line.att_scheduled_days)}</div></div>
+  <div><div class="label">Hours Clocked</div><div class="value">${fmtHours(hours)}${expected ? ` / ${fmtHours(expected)}` : ''}</div></div>`;
+}
+
+/** HR decides how many unexplained absence days are unpaid (0 undoes it); the line is then recomputed. */
+export async function setAttendanceUnpaidDays(lineId: string, days: number, reason: string) {
+  const { error } = await supabase.rpc('set_attendance_unpaid_days', {
+    p_line_id: lineId, p_days: days, p_reason: reason,
+  });
+  if (error) throw error;
+  await saveVariablePayForLine(lineId, {});  // recompute pay from the new days worked
 }
 
 // ─── Removing employees from a draft run ─────────────────────────────────────
@@ -1171,7 +1289,7 @@ export async function getEmployeePayrollProfiles(includeInactive = false): Promi
       'id, employee_id, first_name, last_name, department_id, job_title, is_active, ' +
       'kra_pin, nssf_number, sha_number, helb_account, helb_monthly_amount, ' +
       'bank_name, bank_branch, bank_account_number, employment_type, ' +
-      'basic_salary, allowances, salary_grade, payroll_active, ' +
+      'basic_salary, allowances, salary_grade, payroll_active, attendance_tracked, ' +
       'tax_residency, tax_employment_category, disability_exemption_cert_no, disability_exemption_expiry, ' +
       'mortgage_interest_monthly, post_retirement_medical_monthly'
     )
@@ -1548,8 +1666,9 @@ export function generatePayslipHtml(line: PayrollLine, run: PayslipPeriod): stri
   <div><div class="label">Employee ID</div><div class="value">${line.employee_id || '—'}</div></div>
   <div><div class="label">KRA PIN</div><div class="value">${line.profile?.kra_pin || '—'}</div></div>
   <div><div class="label">Bank Account</div><div class="value">${line.profile?.bank_name ? `${line.profile.bank_name} — ${line.profile.bank_account_number || ''}` : '—'}</div></div>
-  <div><div class="label">Days Worked</div><div class="value">${line.days_worked ?? run.working_days_in_period ?? '—'} / ${run.working_days_in_period ?? '—'}</div></div>
+  <div><div class="label">Days Paid</div><div class="value">${line.days_worked ?? run.working_days_in_period ?? '—'} / ${run.working_days_in_period ?? '—'}</div></div>
   <div><div class="label">Pay Period</div><div class="value">${period}</div></div>
+  ${attendancePayslipCells(line)}
 </div>
 
 <div class="columns">

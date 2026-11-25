@@ -175,7 +175,8 @@ export function MyPayslips() {
 function Payslip({ run, line }: { run: MyPayslipRun; line: PayrollLine }) {
   const allowances = Object.entries(line.allowances || {});
   const otherDeductions = (line.other_deductions || []) as Array<{ name: string; amount: number }>;
-  const hadAbsence = line.leave_days > 0 || line.ooo_days > 0;
+  const hadAbsence = line.leave_days > 0 || line.ooo_days > 0 ||
+    (line.pre_hire_days ?? 0) > 0 || (line.att_unpaid_days ?? 0) > 0;
   const otherVariable = (line.other_variable_pay || []) as Array<{ name: string; amount: number }>;
   const variablePay = [
     { label: `Overtime${line.overtime_hours ? ` (${line.overtime_hours} hrs)` : ''}`, amount: line.overtime_amount || 0 },
@@ -227,15 +228,23 @@ function Payslip({ run, line }: { run: MyPayslipRun; line: PayrollLine }) {
         <InfoRow label="Employee ID" value={line.employee_id ?? '—'} />
         <InfoRow label="KRA PIN"     value={line.profile?.kra_pin ?? 'NOT PROVIDED'} />
         <InfoRow label="Bank A/C"    value={line.profile?.bank_account_number ? `****${line.profile.bank_account_number.slice(-4)}` : '—'} />
-        {hadAbsence && (
+        <InfoRow label="Days Paid" value={`${line.days_worked ?? run.working_days_in_period ?? '—'} / ${run.working_days_in_period ?? '—'}`} />
+        {hadAbsence ? (
+          <InfoRow label="Unpaid Days"
+            value={[
+              line.leave_days > 0 ? `${line.leave_days} unpaid leave` : '',
+              line.ooo_days   > 0 ? `${line.ooo_days} OOO`   : '',
+              (line.pre_hire_days ?? 0) > 0 ? `${line.pre_hire_days} before start date` : '',
+              (line.att_unpaid_days ?? 0) > 0 ? `${line.att_unpaid_days} absent` : '',
+            ].filter(Boolean).join(', ')}
+          />
+        ) : <span />}
+        {line.att_tracked && line.att_scheduled_days != null && (
           <>
-            <InfoRow label="Days Worked" value={String(line.days_worked ?? '—')} />
-            <InfoRow label="Absent Days"
-              value={[
-                line.leave_days > 0 ? `${line.leave_days} leave` : '',
-                line.ooo_days   > 0 ? `${line.ooo_days} OOO`   : '',
-              ].filter(Boolean).join(', ')}
-            />
+            <InfoRow label="Days Present" value={`${Number(line.att_present_days) || 0} / ${Number(line.att_scheduled_days)}`} />
+            <InfoRow label="Hours Clocked"
+              value={`${(Math.round((Number(line.att_hours_clocked) || 0) * 10) / 10)}` +
+                (line.att_hours_expected ? ` / ${Math.round(Number(line.att_hours_expected) * 10) / 10}` : '')} />
           </>
         )}
       </div>

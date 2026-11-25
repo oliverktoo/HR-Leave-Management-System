@@ -66,6 +66,7 @@ export function EmployeePayrollProfiles() {
         allowances:           editing.allowances,
         salary_grade:         editing.salary_grade,
         payroll_active:       editing.payroll_active,
+        attendance_tracked:   editing.attendance_tracked ?? true,
         tax_residency:                    editing.tax_residency ?? 'resident',
         tax_employment_category:          editing.tax_employment_category ?? 'primary',
         disability_exemption_cert_no:     editing.disability_exemption_cert_no?.trim() || null,
@@ -379,6 +380,21 @@ export function EmployeePayrollProfiles() {
                   Reactivate the account in User Management if they are still employed.
                 </div>
               )}
+            </div>
+
+            <div className="form-group" style={{ marginBottom: '1rem' }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer' }}>
+                <input
+                  type="checkbox"
+                  checked={editing.attendance_tracked ?? true}
+                  onChange={e => setField('attendance_tracked', e.target.checked)}
+                />
+                Clocks in (attendance tracked)
+              </label>
+              <div style={{ fontSize: '0.8rem', color: '#64748b', marginTop: 4 }}>
+                Untick for staff who don't use clock-in. Their payslip then shows paid days only, and missing clock-ins
+                are never flagged in payroll.
+              </div>
             </div>
 
             {saveError && <div className="error-message" style={{ marginBottom: '1rem' }}>{saveError}</div>}

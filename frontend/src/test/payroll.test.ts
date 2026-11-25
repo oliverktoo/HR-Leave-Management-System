@@ -10,7 +10,7 @@ import { vi, describe, expect, test } from 'vitest';
 vi.mock('../lib/supabaseClient', () => ({ supabase: {} }));
 
 import {
-  computeHousingLevy, computeNSSF, computePAYE, computePayrollLine, computeSHA,
+  computeHousingLevy, computeNSSF, computePAYE, computePayrollLine, computeSHA, payrollDays,
   type PayrollSettings,
 } from '../services/payrollService';
 
@@ -324,5 +324,36 @@ describe('final dues on a payslip line', () => {
   test('terminal PAYE is ignored when there are no lump sums', () => {
     const l = computePayrollLine(employee({ basic_salary: 100_000 }), SETTINGS, [], 0, 22, { terminal_paye: 9_999 }, PERIOD);
     expect(l.paye_amount).toBe(19_308);
+  });
+});
+
+describe('payrollDays (paid days on a line)', () => {
+  const base = { workingDays: 21, unpaidLeaveDays: 0, preHireDays: 0, unexplainedDays: 0, attUnpaidDays: 0 };
+
+  test('a full month', () => {
+    expect(payrollDays(base)).toEqual({ unpaidDays: 0, daysWorked: 21, attUnpaidDays: 0 });
+  });
+
+  test('unpaid leave, days before the start date and absences HR marked unpaid all add up', () => {
+    expect(payrollDays({ ...base, unpaidLeaveDays: 2, preHireDays: 5, unexplainedDays: 3, attUnpaidDays: 1 }))
+      .toEqual({ unpaidDays: 8, daysWorked: 13, attUnpaidDays: 1 });
+  });
+
+  test('unexplained absences cost nothing unless HR marks them unpaid', () => {
+    expect(payrollDays({ ...base, unexplainedDays: 4 }).daysWorked).toBe(21);
+  });
+
+  test("HR's choice is capped when clock-ins are corrected later", () => {
+    expect(payrollDays({ ...base, unexplainedDays: 1, attUnpaidDays: 3 }))
+      .toEqual({ unpaidDays: 1, daysWorked: 20, attUnpaidDays: 1 });
+  });
+
+  test('never below zero days', () => {
+    expect(payrollDays({ ...base, preHireDays: 30 }).daysWorked).toBe(0);
+  });
+
+  test("a leaver's final-dues days worked wins", () => {
+    expect(payrollDays({ ...base, unpaidLeaveDays: 2, finalDuesDaysWorked: 10 }))
+      .toEqual({ unpaidDays: 11, daysWorked: 10, attUnpaidDays: 0 });
   });
 });
