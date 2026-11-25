@@ -1013,7 +1013,7 @@ const UserManagement = () => {
                       setShowEmailConfirm(false);
                     }}
                     required
-                    placeholder="staff@fkf.co.ke"
+                    placeholder="staff@footballkenya.org"
                   />
                   {editEmail.trim().toLowerCase() !== selectedUser.email.toLowerCase() && (
                     <small style={{ color: '#f59e0b', marginTop: 4, display: 'block' }}>

@@ -1405,7 +1405,7 @@ export function StaffCards() {
     accent_color:     '#1d4ed8',
     back_color:       '#0f172a',
     validity_years:   2,
-    website:          'www.fkf.co.ke',
+    website:          'www.footballkenya.org',
     emergency_number: '+254 000 000000',
     card_overrides:   {},
     // font colours default to undefined → component uses built-in defaults
