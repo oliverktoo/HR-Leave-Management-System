@@ -1598,7 +1598,7 @@ ${taxComputationHtml(line, kes)}
 <div class="footer">
   This payslip is computer-generated and does not require a signature. &nbsp;|&nbsp;
   FKF/HR/POL/2026/004 &nbsp;|&nbsp; Records retained for 7 years per Employment Act 2007.
-  <br>For queries contact: payroll@fkf.co.ke
+  <br>For queries contact: payroll@footballkenya.org
 </div>
 </body></html>`;
 }
