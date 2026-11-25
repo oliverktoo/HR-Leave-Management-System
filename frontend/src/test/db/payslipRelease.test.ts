@@ -1,7 +1,11 @@
 // 076_payslip_release.sql: staff see their own payslip only after HR releases it.
 import { beforeAll, describe, expect, test } from 'vitest';
 import type { PGlite } from '@electric-sql/pglite';
+import { vi } from 'vitest';
 import { addUser, asUser, createLeaveDb } from './leaveDb';
+import { lineToDbFields, type ComputedPayrollLine } from '../../services/payrollService';
+
+vi.mock('../../lib/supabaseClient', () => ({ supabase: {} }));
 
 let db: PGlite;
 let hr: string, emp1: string, emp2: string, finance: string;
@@ -27,7 +31,7 @@ beforeAll(async () => {
   db = await createLeaveDb(['021_ooo_requests.sql', '030_payroll_foundation.sql', '031_payroll_approval_roles.sql',
     '032_payroll_leave_integration.sql', '057_payroll_sop_compliance.sql', '058_payroll_gap_fixes.sql',
     '076_payslip_release.sql', '077_payroll_special_cases.sql', '078_salary_arrears.sql',
-    '041_exit_management.sql', '079_final_dues.sql']);
+    '041_exit_management.sql', '079_final_dues.sql', '081_payroll_lines_deduction_columns.sql']);
   hr = await addUser(db, 'hr_admin');
   emp1 = await addUser(db, 'employee');
   emp2 = await addUser(db, 'employee');
@@ -193,5 +197,18 @@ describe('079 final dues and exit requests', () => {
        VALUES ($1, $2, $3, '2026-07-31', 22, '{}', '{}', 1000)`, [rows[0].id, approvedRun, emp2]));
     expect((await asUser(db, finance, (tx) => tx.query(`SELECT 1 FROM final_dues`))).rows).toHaveLength(1);
     expect((await asUser(db, emp2, (tx) => tx.query(`SELECT 1 FROM final_dues`))).rows).toHaveLength(0);
+  });
+});
+
+describe('payroll_lines schema matches what the app saves', () => {
+  test('every column written when computing a run exists', async () => {
+    const written = [
+      'run_id', 'user_id', 'employee_id', 'basic_salary', 'allowances', 'days_worked', 'leave_days', 'ooo_days',
+      ...Object.keys(lineToDbFields({} as ComputedPayrollLine)),
+    ];
+    const { rows } = await db.query<{ column_name: string }>(
+      `SELECT column_name FROM information_schema.columns WHERE table_name = 'payroll_lines'`);
+    const have = new Set(rows.map(r => r.column_name));
+    expect(written.filter(c => !have.has(c))).toEqual([]);
   });
 });
