@@ -21,7 +21,11 @@ import {
   formatKES,
   monthName,
   ApprovalAction,
+  getRunExclusions,
+  restorePayrollEmployee,
+  type RunExclusion,
 } from '../../services/payrollService';
+import { RemoveLineModal } from './RemoveLineModal';
 import { useAuth } from '../../hooks/useAuth';
 import { AdminSidebar } from '../admin/AdminSidebar';
 import NotificationBell from '../notifications/NotificationBell';
@@ -317,6 +321,8 @@ export function PayrollRunDetail() {
   const [editVarPayLine,   setEditVarPayLine]   = useState<PayrollLine | null>(null);
   const [arrearsLine,      setArrearsLine]      = useState<PayrollLine | null>(null);
   const [finalDuesLine,    setFinalDuesLine]    = useState<PayrollLine | null>(null);
+  const [removeLine,       setRemoveLine]       = useState<PayrollLine | null>(null);
+  const [exclusions,       setExclusions]       = useState<RunExclusion[]>([]);
   const [markRemittance,   setMarkRemittance]   = useState<PayrollRemittance | null>(null);
   const [showRevisionModal, setShowRevisionModal] = useState(false);
 
@@ -327,6 +333,7 @@ export function PayrollRunDetail() {
       const [r, ls] = await Promise.all([getPayrollRunById(id), getPayrollLines(id)]);
       setRun(r);
       setLines(ls);
+      setExclusions(await getRunExclusions(id));
       if (r && ['approved', 'paid'].includes(r.status)) {
         const rems = await getRemittances(id);
         setRemittances(rems);
@@ -346,6 +353,16 @@ export function PayrollRunDetail() {
     if (!id) return;
     setActionLoading(true);
     try { await computeAndSaveRun(id); await load(); }
+    catch (e: unknown) { setError(errorMessage(e)); }
+    finally { setActionLoading(false); }
+  }
+
+  async function handleRestore(ex: RunExclusion) {
+    if (!id) return;
+    if (!window.confirm(`Add ${ex.name} back to this run? Their pay is recomputed for the month.`)) return;
+    setActionLoading(true);
+    setError('');
+    try { await restorePayrollEmployee(id, ex.user_id); await load(); }
     catch (e: unknown) { setError(errorMessage(e)); }
     finally { setActionLoading(false); }
   }
@@ -610,6 +627,12 @@ export function PayrollRunDetail() {
                           {line.is_override && <span style={{ marginLeft: 6, fontSize: '0.7rem', color: '#f59e0b' }}>✎ Override</span>}
                         </div>
                         <div style={{ fontSize: '0.75rem', color: '#94a3b8' }}>{line.employee_id}</div>
+                        {line.profile && (line.profile.payroll_active === false || line.profile.is_active === false) && (
+                          <div style={{ fontSize: '0.7rem', color: '#dc2626' }}
+                            title="This employee is no longer on payroll (or their account is deactivated). Remove them unless this is their final month.">
+                            ⚠ {line.profile.is_active === false ? 'Account deactivated' : 'Payroll switched off'}
+                          </div>
+                        )}
                         {(line.leave_days > 0 || line.ooo_days > 0) && (
                           <div style={{ fontSize: '0.7rem', color: '#f59e0b' }}>
                             {line.leave_days > 0 && `${line.leave_days}d leave `}
@@ -654,6 +677,12 @@ export function PayrollRunDetail() {
                             title="View payslip">
                             Payslip
                           </button>
+                          {isDraft && isHrAdmin && (
+                            <button className="btn btn-sm btn-outline" style={{ color: '#dc2626', borderColor: '#fecaca' }}
+                              onClick={() => setRemoveLine(line)} title="Remove this employee from the run">
+                              Remove
+                            </button>
+                          )}
                         </div>
                       </td>
                     </tr>
@@ -663,6 +692,47 @@ export function PayrollRunDetail() {
             </table>
           </div>
         </div>
+
+        {/* ── Employees removed from this run ── */}
+        {exclusions.length > 0 && (
+          <div className="card" style={{ marginBottom: '1.5rem' }}>
+            <div className="card-header">
+              <h2 className="card-title">Removed from this run ({exclusions.length})</h2>
+            </div>
+            <div className="table-container">
+              <table className="data-table">
+                <thead>
+                  <tr><th>Employee</th><th>Reason</th><th>Removed</th><th></th></tr>
+                </thead>
+                <tbody>
+                  {exclusions.map(ex => (
+                    <tr key={ex.user_id}>
+                      <td>
+                        <strong>{ex.name}</strong>
+                        <div style={{ fontSize: '0.75rem', color: '#94a3b8' }}>{ex.employee_id}</div>
+                        {!ex.payroll_active && <div style={{ fontSize: '0.7rem', color: '#dc2626' }}>Payroll switched off</div>}
+                      </td>
+                      <td style={{ fontSize: '0.85rem' }}>{ex.reason}</td>
+                      <td style={{ fontSize: '0.8rem', color: '#64748b', whiteSpace: 'nowrap' }}>
+                        {new Date(ex.excluded_at).toLocaleDateString('en-KE', { dateStyle: 'medium' })}
+                      </td>
+                      <td>
+                        {isDraft && isHrAdmin && (
+                          <button className="btn btn-sm btn-outline" onClick={() => handleRestore(ex)}
+                            disabled={actionLoading || !ex.payroll_active}
+                            title={ex.payroll_active ? 'Add back to this run'
+                              : 'Turn payroll back on in Employee Payroll Profiles first'}>
+                            Add back
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
 
         {/* ── Remittance tracking (approved / paid) ── */}
         {isApprovedOrPaid && remittances.length > 0 && (
@@ -759,6 +829,15 @@ export function PayrollRunDetail() {
           line={finalDuesLine}
           onSaved={load}
           onClose={() => setFinalDuesLine(null)}
+        />
+      )}
+
+      {removeLine && (
+        <RemoveLineModal
+          line={removeLine}
+          period={`${monthName(run.pay_period_month)} ${run.pay_period_year}`}
+          onRemoved={load}
+          onClose={() => setRemoveLine(null)}
         />
       )}
 

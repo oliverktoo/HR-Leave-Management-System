@@ -293,6 +293,8 @@ export interface PayrollLine {
     bank_name?: string;
     bank_account_number?: string;
     department_id?: string;
+    payroll_active?: boolean;
+    is_active?: boolean;
   };
 }
 
@@ -841,7 +843,7 @@ export async function getPayrollLines(runId: string): Promise<PayrollLine[]> {
   if (userIds.length > 0) {
     const { data: profiles } = await supabase
       .from('users_profile')
-      .select('id, first_name, last_name, kra_pin, nssf_number, bank_name, bank_account_number, department_id')
+      .select('id, first_name, last_name, kra_pin, nssf_number, bank_name, bank_account_number, department_id, payroll_active, is_active')
       .in('id', userIds);
     const profileMap: Record<string, PayrollLine['profile']> = {};
     for (const p of (profiles || [])) profileMap[p.id] = p;
@@ -923,7 +925,7 @@ export async function computeAndSaveRun(runId: string): Promise<{
   const month = run.pay_period_month;
 
   // Load settings, active employees, working days, absence data, and existing lines in parallel
-  const [settings, empResult, wdResult, absenceResult, existingLinesResult] = await Promise.all([
+  const [settings, empResult, wdResult, absenceResult, existingLinesResult, exclusionsResult] = await Promise.all([
     getPayrollSettings(),
     supabase
       .from('users_profile')
@@ -938,9 +940,13 @@ export async function computeAndSaveRun(runId: string): Promise<{
         'leave_pay, notice_pay, severance_pay, gratuity_amount, gratuity_exempt, compensation_amount, terminal_paye, ' +
         'benefits_in_kind, other_variable_pay, court_deduction_amount, court_deduction_ref')
       .eq('run_id', runId),
+    // Employees HR removed from this run ("skip this month") stay out on recompute
+    supabase.from('payroll_run_exclusions').select('user_id').eq('run_id', runId),
   ]);
 
   if (empResult.error) throw empResult.error;
+  if (exclusionsResult.error) throw exclusionsResult.error;
+  const excluded = new Set(((exclusionsResult.data as Array<{ user_id: string }>) || []).map(r => r.user_id));
   // Without these, a recompute would silently wipe overtime/bonuses already entered
   if (existingLinesResult.error) throw existingLinesResult.error;
   if (absenceResult.error) throw absenceResult.error;
@@ -973,7 +979,9 @@ export async function computeAndSaveRun(runId: string): Promise<{
     };
   }
 
-  const computed = ((empResult.data as unknown as Array<Record<string, unknown>>) || []).map(emp => {
+  const employees = ((empResult.data as unknown as Array<Record<string, unknown>>) || [])
+    .filter(emp => !excluded.has(emp.id as string));
+  const computed = employees.map(emp => {
     const absence = absenceMap[emp.id as string];
     const unpaidDays = absence?.unpaid_days ?? 0;
     const varPay = existingVarPayMap[emp.id as string] ?? {};
@@ -1044,6 +1052,63 @@ async function upsertPayrollLinesWithAbsence(
     .from('payroll_lines')
     .upsert(rows, { onConflict: 'run_id,user_id' });
   if (error) throw error;
+}
+
+// ─── Removing employees from a draft run ─────────────────────────────────────
+
+export interface RunExclusion {
+  user_id: string;
+  reason: string;
+  excluded_at: string;
+  name: string;
+  employee_id: string | null;
+  payroll_active: boolean;
+}
+
+/**
+ * Remove an employee's line from a draft run (HR only, audited).
+ * takeOffPayroll also switches payroll off for them for later months.
+ * Totals are refreshed by recomputing the run.
+ */
+export async function removePayrollLine(lineId: string, runId: string, reason: string, takeOffPayroll: boolean) {
+  const { error } = await supabase.rpc('remove_payroll_line', {
+    p_line_id: lineId, p_reason: reason, p_take_off_payroll: takeOffPayroll,
+  });
+  if (error) throw error;
+  await computeAndSaveRun(runId);
+}
+
+/** Undo "skip this month": the employee is added back by recomputing (if payroll is on for them). */
+export async function restorePayrollEmployee(runId: string, userId: string) {
+  const { error } = await supabase.rpc('restore_payroll_employee', { p_run_id: runId, p_user_id: userId });
+  if (error) throw error;
+  await computeAndSaveRun(runId);
+}
+
+export async function getRunExclusions(runId: string): Promise<RunExclusion[]> {
+  const { data, error } = await supabase
+    .from('payroll_run_exclusions')
+    .select('user_id, reason, excluded_at')
+    .eq('run_id', runId)
+    .order('excluded_at');
+  if (error) throw error;
+  const rows = (data as Array<{ user_id: string; reason: string; excluded_at: string }>) || [];
+  if (rows.length === 0) return [];
+  const { data: profiles, error: pErr } = await supabase
+    .from('users_profile')
+    .select('id, first_name, last_name, employee_id, payroll_active')
+    .in('id', rows.map(r => r.user_id));
+  if (pErr) throw pErr;
+  const byId = new Map(((profiles as Array<Record<string, unknown>>) || []).map(p => [p.id as string, p]));
+  return rows.map(r => {
+    const p = byId.get(r.user_id);
+    return {
+      ...r,
+      name: p ? `${p.first_name ?? ''} ${p.last_name ?? ''}`.trim() : 'Unknown employee',
+      employee_id: (p?.employee_id as string) ?? null,
+      payroll_active: Boolean(p?.payroll_active),
+    };
+  });
 }
 
 // ─── Approval workflow ────────────────────────────────────────────────────────
