@@ -1,3 +1,4 @@
+import { errorMessage } from '../../utils/errorMessage';
 import React, { useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
@@ -44,7 +45,7 @@ export function MyBenefits() {
   useEffect(() => {
     getMyBenefits()
       .then(data => setBenefits(data.filter(b => b.is_active)))
-      .catch(e  => setError(e instanceof Error ? e.message : String(e)))
+      .catch(e  => setError(errorMessage(e)))
       .finally(() => setLoading(false));
   }, []);
 

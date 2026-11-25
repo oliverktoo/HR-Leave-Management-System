@@ -1,5 +1,6 @@
 // Final dues for a leaver, on their last payslip. Pre-filled from the exit
 // request, leave balance and contract; every suggested amount can be changed.
+import { errorMessage } from '../../utils/errorMessage';
 import { useEffect, useMemo, useState } from 'react';
 import { supabase } from '../../lib/supabaseClient';
 import {
@@ -51,7 +52,7 @@ export function FinalDuesModal({ line, onSaved, onClose }: Props) {
         gratuityAmount: 0, gratuityFrom: start, gratuityTo: last.slice(0, 7),
         compensationAmount: 0, compensationBasis: 'none', compensationMonths: 0,
       });
-    }).catch(e => setErr(e instanceof Error ? e.message : String(e)));
+    }).catch(e => setErr(errorMessage(e)));
   }, [line.id]);
 
   // Working days paid = working days from the 1st to the last working day
@@ -83,20 +84,20 @@ export function FinalDuesModal({ line, onSaved, onClose }: Props) {
     try {
       const r = await previewFinalDues(line.id, f!);
       setPreview({ tax: r.tax, gross: r.line.gross_pay, paye: r.line.paye_amount, net: r.line.net_pay });
-    } catch (e) { setErr(e instanceof Error ? e.message : String(e)); }
+    } catch (e) { setErr(errorMessage(e)); }
     finally { setBusy(false); }
   }
   async function save() {
     setBusy(true); setErr('');
     try { await saveFinalDues(line.id, f!); await onSaved(); onClose(); }
-    catch (e) { setErr(e instanceof Error ? e.message : String(e)); }
+    catch (e) { setErr(errorMessage(e)); }
     finally { setBusy(false); }
   }
   async function remove() {
     if (!window.confirm('Remove final dues from this payslip? It goes back to a normal month.')) return;
     setBusy(true); setErr('');
     try { await removeFinalDues(line.id); await onSaved(); onClose(); }
-    catch (e) { setErr(e instanceof Error ? e.message : String(e)); }
+    catch (e) { setErr(errorMessage(e)); }
     finally { setBusy(false); }
   }
 

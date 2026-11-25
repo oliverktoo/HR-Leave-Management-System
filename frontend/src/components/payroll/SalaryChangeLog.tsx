@@ -1,3 +1,4 @@
+import { errorMessage } from '../../utils/errorMessage';
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { recordSalaryChange, formatKES, SalaryChange } from '../../services/payrollService';
@@ -73,7 +74,7 @@ export function SalaryChangeLog() {
         if (err) throw err;
         setChanges((all as SalaryChange[]) || []);
       } catch (e: unknown) {
-        setError(e instanceof Error ? e.message : String(e));
+        setError(errorMessage(e));
       } finally {
         setLoading(false);
       }
@@ -117,7 +118,7 @@ export function SalaryChangeLog() {
       setShowModal(false);
       setForm(EMPTY_FORM);
     } catch (e: unknown) {
-      setSaveError(e instanceof Error ? e.message : String(e));
+      setSaveError(errorMessage(e));
     } finally {
       setSaving(false);
     }

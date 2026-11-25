@@ -1,3 +1,4 @@
+import { errorMessage } from '../../utils/errorMessage';
 import { useState, useEffect } from 'react';
 import { supabase } from '../../lib/supabaseClient';
 import {
@@ -53,7 +54,7 @@ export function MyPayslips() {
       const lines = await getPayrollLines(run.id);
       setLine(lines.find(l => l.user_id === userId) ?? null);
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errorMessage(e));
     } finally {
       setLineLoading(false);
     }

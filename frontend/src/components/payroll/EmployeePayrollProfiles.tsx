@@ -1,3 +1,4 @@
+import { errorMessage } from '../../utils/errorMessage';
 import { useState, useEffect } from 'react';
 import {
   getEmployeePayrollProfiles,
@@ -75,7 +76,7 @@ export function EmployeePayrollProfiles() {
       setEmployees(prev => prev.map(e => e.id === editing.id ? { ...e, ...editing } : e));
       setEditing(null);
     } catch (e: unknown) {
-      setSaveError(e instanceof Error ? e.message : String(e));
+      setSaveError(errorMessage(e));
     } finally {
       setSaving(false);
     }

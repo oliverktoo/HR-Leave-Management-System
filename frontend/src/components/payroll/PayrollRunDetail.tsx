@@ -1,3 +1,4 @@
+import { errorMessage } from '../../utils/errorMessage';
 import { useState, useEffect, useCallback, type CSSProperties } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
@@ -95,7 +96,7 @@ function VariablePayModal({ line, onSave, onClose }: VarPayModalProps) {
       });
       onClose();
     } catch (e: unknown) {
-      setErr(e instanceof Error ? e.message : String(e));
+      setErr(errorMessage(e));
     } finally {
       setSaving(false);
     }
@@ -206,7 +207,7 @@ function RemittanceModal({ remittance, onSave, onClose }: RemittanceModalProps) 
       await onSave(remittance.id, ref.trim(), notes);
       onClose();
     } catch (e: unknown) {
-      setErr(e instanceof Error ? e.message : String(e));
+      setErr(errorMessage(e));
     } finally {
       setSaving(false);
     }
@@ -260,7 +261,7 @@ function RevisionModal({ onConfirm, onClose }: RevisionModalProps) {
     try {
       await onConfirm(notes.trim());
     } catch (e: unknown) {
-      setErr(e instanceof Error ? e.message : String(e));
+      setErr(errorMessage(e));
     } finally {
       setSaving(false);
     }
@@ -331,7 +332,7 @@ export function PayrollRunDetail() {
         setRemittances(rems);
       }
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errorMessage(e));
     } finally {
       setLoading(false);
     }
@@ -345,7 +346,7 @@ export function PayrollRunDetail() {
     if (!id) return;
     setActionLoading(true);
     try { await computeAndSaveRun(id); await load(); }
-    catch (e: unknown) { setError(e instanceof Error ? e.message : String(e)); }
+    catch (e: unknown) { setError(errorMessage(e)); }
     finally { setActionLoading(false); }
   }
 
@@ -362,7 +363,7 @@ export function PayrollRunDetail() {
         const rems = await getRemittances(id);
         setRemittances(rems);
       }
-    } catch (e: unknown) { setError(e instanceof Error ? e.message : String(e)); }
+    } catch (e: unknown) { setError(errorMessage(e)); }
     finally { setActionLoading(false); }
   }
 
@@ -395,7 +396,7 @@ export function PayrollRunDetail() {
     setActionLoading(true);
     setError('');
     try { setRun(await setPayslipsReleased(id, release)); }
-    catch (e: unknown) { setError(e instanceof Error ? e.message : String(e)); }
+    catch (e: unknown) { setError(errorMessage(e)); }
     finally { setActionLoading(false); }
   }
 

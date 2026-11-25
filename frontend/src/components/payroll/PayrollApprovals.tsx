@@ -1,3 +1,4 @@
+import { errorMessage } from '../../utils/errorMessage';
 import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
@@ -65,7 +66,7 @@ export function PayrollApprovals() {
         all.filter(r => r.status === 'approved' || r.status === 'paid').slice(0, 6)
       );
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errorMessage(e));
     } finally {
       setLoading(false);
     }
@@ -97,7 +98,7 @@ export function PayrollApprovals() {
       setComments('');
       await load();
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errorMessage(e));
     } finally {
       setActionLoading(false);
     }

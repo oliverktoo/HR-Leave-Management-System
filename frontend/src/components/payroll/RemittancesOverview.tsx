@@ -1,3 +1,4 @@
+import { errorMessage } from '../../utils/errorMessage';
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { markRemittanceDone, formatKES, monthName, PayrollRemittance } from '../../services/payrollService';
@@ -62,7 +63,7 @@ export function RemittancesOverview() {
       }));
       setRemittances(rows);
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errorMessage(e));
     } finally {
       setLoading(false);
     }
@@ -80,7 +81,7 @@ export function RemittancesOverview() {
       setModal(null);
       await load();
     } catch (e: unknown) {
-      setSaveError(e instanceof Error ? e.message : String(e));
+      setSaveError(errorMessage(e));
     } finally {
       setSaving(false);
     }

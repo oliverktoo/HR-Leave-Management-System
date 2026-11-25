@@ -1,5 +1,6 @@
 // Salary arrears for one payroll line: enter back pay, see the tax worked out by
 // spreading it back to the months it relates to, then save.
+import { errorMessage } from '../../utils/errorMessage';
 import { useEffect, useState } from 'react';
 import {
   formatKES,
@@ -36,7 +37,7 @@ export function ArrearsModal({ line, onSaved, onClose }: Props) {
   useEffect(() => {
     getArrearsForLine(line.id)
       .then(saved => setEntries(saved.length ? saved.map(({ description, amount, from, to }) => ({ description, amount, from, to })) : [blank()]))
-      .catch(e => setErr(e instanceof Error ? e.message : String(e)))
+      .catch(e => setErr(errorMessage(e)))
       .finally(() => setLoading(false));
   }, [line.id]);
 
@@ -49,14 +50,14 @@ export function ArrearsModal({ line, onSaved, onClose }: Props) {
   async function workOut() {
     setWorking(true); setErr('');
     try { setPreview(await previewArrearsForLine(line.id, filled, manual)); }
-    catch (e) { setErr(e instanceof Error ? e.message : String(e)); }
+    catch (e) { setErr(errorMessage(e)); }
     finally { setWorking(false); }
   }
 
   async function save() {
     setWorking(true); setErr('');
     try { await saveArrearsForLine(line.id, filled, manual); await onSaved(); onClose(); }
-    catch (e) { setErr(e instanceof Error ? e.message : String(e)); }
+    catch (e) { setErr(errorMessage(e)); }
     finally { setWorking(false); }
   }
 
@@ -64,7 +65,7 @@ export function ArrearsModal({ line, onSaved, onClose }: Props) {
     if (!window.confirm('Remove all arrears from this payslip?')) return;
     setWorking(true); setErr('');
     try { await saveArrearsForLine(line.id, []); await onSaved(); onClose(); }
-    catch (e) { setErr(e instanceof Error ? e.message : String(e)); }
+    catch (e) { setErr(errorMessage(e)); }
     finally { setWorking(false); }
   }
 

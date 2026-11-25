@@ -1,3 +1,4 @@
+import { errorMessage } from '../../utils/errorMessage';
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { createPayrollRun, computeAndSaveRun } from '../../services/payrollService';
@@ -12,6 +13,7 @@ export function PayrollRunNew() {
   const [notes, setNotes] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [createdRunId, setCreatedRunId] = useState<string | null>(null);
 
   const months = [
     'January','February','March','April','May','June',
@@ -23,13 +25,22 @@ export function PayrollRunNew() {
   async function handleCreate() {
     setLoading(true);
     setError('');
+    setCreatedRunId(null);
+    let runId: string | null = null;
     try {
       const run = await createPayrollRun(year, month, notes || undefined);
+      runId = run.id;
       // Immediately compute lines
       await computeAndSaveRun(run.id);
       navigate(`/payroll/runs/${run.id}`);
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : String(e));
+      if (runId) {
+        // The run exists now; retrying here would say "already exists" — Recompute from the run page instead.
+        setCreatedRunId(runId);
+        setError(`The run was created but computing it failed: ${errorMessage(e)}`);
+      } else {
+        setError(errorMessage(e));
+      }
     } finally {
       setLoading(false);
     }
@@ -83,7 +94,18 @@ export function PayrollRunNew() {
             />
           </div>
 
-          {error && <div className="error-message">{error}</div>}
+          {error && (
+            <div className="error-message">
+              {error}
+              {createdRunId && (
+                <div style={{ marginTop: '0.5rem' }}>
+                  <button className="btn btn-outline" onClick={() => navigate(`/payroll/runs/${createdRunId}`)}>
+                    Open the run (use ↻ Recompute there)
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
 
           <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'flex-end' }}>
             <button className="btn btn-outline" onClick={() => navigate('/payroll/dashboard')}>

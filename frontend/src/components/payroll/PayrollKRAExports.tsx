@@ -1,3 +1,4 @@
+import { errorMessage } from '../../utils/errorMessage';
 import { useState, useEffect } from 'react';
 import { supabase } from '../../lib/supabaseClient';
 import {
@@ -214,7 +215,7 @@ export function PayrollKRAExports() {
         setImportFileName('');
       }
     } catch (e: unknown) {
-      setImportError(e instanceof Error ? e.message : String(e));
+      setImportError(errorMessage(e));
     } finally {
       setImportLoading(false);
     }
@@ -248,7 +249,7 @@ export function PayrollKRAExports() {
       setSummaries(data);
       setSummaryYear(year);
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errorMessage(e));
     } finally {
       setLoading(false);
     }
@@ -263,7 +264,7 @@ export function PayrollKRAExports() {
       setRunLines(lines);
       setLoadedRunId(selectedRunId);
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errorMessage(e));
     } finally {
       setLoading(false);
     }
@@ -336,7 +337,7 @@ export function PayrollKRAExports() {
       setOrgName(orgNameEdit.trim());
       setOrgSaveSuccess(true);
     } catch (e: unknown) {
-      setOrgSaveError(e instanceof Error ? e.message : String(e));
+      setOrgSaveError(errorMessage(e));
     } finally {
       setOrgSaving(false);
     }
@@ -356,7 +357,7 @@ export function PayrollKRAExports() {
         setImportFileName(file.name);
         await saveImportToDB(importYear, parsed, file.name);
       } catch (err: unknown) {
-        setImportError(err instanceof Error ? err.message : String(err));
+        setImportError(errorMessage(err));
         setImportedData([]);
       }
     };
@@ -742,7 +743,7 @@ export function PayrollKRAExports() {
                         setImportedData([]);
                         setImportFileName('');
                       } catch (e: unknown) {
-                        setImportError(e instanceof Error ? e.message : String(e));
+                        setImportError(errorMessage(e));
                       }
                     }}>
                     Clear

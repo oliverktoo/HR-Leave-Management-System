@@ -1,3 +1,4 @@
+import { errorMessage } from '../../utils/errorMessage';
 import { useState, useEffect, useMemo } from 'react';
 import { useAuth } from '../../hooks/useAuth';
 import { AdminSidebar } from '../admin/AdminSidebar';
@@ -104,7 +105,7 @@ export function BenefitsManagement() {
       const data = await getAllBenefits();
       setBenefits(data);
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errorMessage(e));
     } finally {
       setLoading(false);
     }
@@ -223,7 +224,7 @@ export function BenefitsManagement() {
       showSuccess(editing ? 'Benefit updated.' : 'Benefit added.');
       closeModal();
     } catch (e: unknown) {
-      setModalError(e instanceof Error ? e.message : String(e));
+      setModalError(errorMessage(e));
     } finally {
       setSaving(false);
     }
@@ -237,7 +238,7 @@ export function BenefitsManagement() {
       setBenefits(prev => prev.map(b => b.id === id ? { ...b, is_active: false } : b));
       showSuccess('Benefit deactivated.');
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errorMessage(e));
     }
   }
 
@@ -250,7 +251,7 @@ export function BenefitsManagement() {
       setConfirmDelete(null);
       showSuccess('Benefit deleted.');
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errorMessage(e));
     }
   }
 
