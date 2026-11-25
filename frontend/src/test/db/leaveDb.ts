@@ -16,9 +16,12 @@ const PLATFORM_STUBS = `
     email_confirmed_at timestamptz, raw_app_meta_data jsonb, raw_user_meta_data jsonb,
     created_at timestamptz DEFAULT now(), updated_at timestamptz DEFAULT now(),
     confirmation_token text, recovery_token text, email_change_token_new text, email_change text);
-  -- pgcrypto stand-ins (PGlite has no pgcrypto); tests only need "password changed or not"
-  CREATE OR REPLACE FUNCTION crypt(text, text) RETURNS text LANGUAGE sql AS $$ SELECT 'hash:' || $1 $$;
-  CREATE OR REPLACE FUNCTION gen_salt(text) RETURNS text LANGUAGE sql AS $$ SELECT 'salt' $$;
+  -- pgcrypto stand-ins (PGlite has no pgcrypto); tests only need "password changed or not".
+  -- Like Supabase, they live in the "extensions" schema, reached via the default search_path.
+  CREATE SCHEMA IF NOT EXISTS extensions;
+  CREATE OR REPLACE FUNCTION extensions.crypt(text, text) RETURNS text LANGUAGE sql AS $$ SELECT 'hash:' || $1 $$;
+  CREATE OR REPLACE FUNCTION extensions.gen_salt(text) RETURNS text LANGUAGE sql AS $$ SELECT 'salt' $$;
+  SET search_path = "$user", public, extensions;
   -- auth.uid() reads the uid set by the test via set_config('test.uid', ...)
   CREATE OR REPLACE FUNCTION auth.uid() RETURNS uuid LANGUAGE sql STABLE AS
     $$ SELECT nullif(current_setting('test.uid', true), '')::uuid $$;
@@ -50,7 +53,7 @@ function upTo(src: string, marker: string): string {
 // created (default privileges); RLS then decides which rows they can touch.
 // Applied BEFORE migrations so a migration's REVOKE sticks, as in production.
 const SUPABASE_DEFAULT_GRANTS = `
-  GRANT USAGE ON SCHEMA public, auth TO anon, authenticated;
+  GRANT USAGE ON SCHEMA public, auth, extensions TO anon, authenticated;
   ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO anon, authenticated;
   ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO anon, authenticated;
   GRANT EXECUTE ON FUNCTION auth.uid(), auth.role() TO anon, authenticated;

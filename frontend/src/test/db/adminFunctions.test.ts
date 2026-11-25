@@ -40,7 +40,8 @@ describe('before 074 (current production)', () => {
 describe('after 074', () => {
   let db: PGlite, hr: string, emp: string, victim: string, stranger: string;
   beforeAll(async () => {
-    db = await createLeaveDb([...ADMIN_FUNCTION_FILES, '074_lock_down_admin_functions.sql']);
+    db = await createLeaveDb([...ADMIN_FUNCTION_FILES, '074_lock_down_admin_functions.sql',
+      '080_fix_admin_functions_search_path.sql']);
     hr = await addUser(db, 'hr_admin');
     emp = await addUser(db, 'employee');
     victim = await addUser(db, 'super_admin');
